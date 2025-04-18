@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", message="X does not have valid feature names, 
 
 
 # --- Configuration ---
-st.set_page_config(layout="wide", page_title="Mental Health Analytics", page_icon="🧠")
+st.set_page_config(layout="wide", page_title="Mental Health Analytics", page_icon="")
 st.markdown("""
     <style>
         /* Your CSS remains the same */
@@ -295,7 +295,7 @@ if df is not None and not df.empty:
             """, unsafe_allow_html=True)
 
 
-        st.markdown("### 📊 Depression Rate by Demographics")
+        st.markdown("###  Depression Rate by Demographics")
         col_d1, col_d2 = st.columns(2)
 
         with col_d1:
@@ -334,7 +334,7 @@ if df is not None and not df.empty:
                 else: st.info("No data to plot for Age Range vs Depression after filtering.")
             else: st.info("AgeRange or Depression column missing or no data after filtering.")
 
-        st.markdown("### 🧩 Depression & Profession Breakdown")
+        st.markdown("###  Depression & Profession Breakdown")
         profession_col = 'Profession'
         if not df_filtered.empty and profession_col in df_filtered.columns and depression_col in df_filtered.columns:
             dep_prof = df_filtered.groupby([profession_col, depression_col], observed=True).size().reset_index(name='count')
