@@ -34,7 +34,7 @@ st.markdown("""
 
 # --- Data Loading and Preprocessing ---
 @st.cache_data
-def load_data(file_path="C:\\Users\\daksh\\Downloads\\Analytica Dataset.csv"):
+def load_data(file_path="Analytica Dataset.csv"):
     try:
         df = pd.read_csv(file_path)
         st.success(f"Successfully loaded data from {file_path}")
