@@ -188,7 +188,7 @@ df = load_data() # Use default path or specify another
 if df is not None and not df.empty:
 
     # --- Sidebar Filters ---
-    st.sidebar.header("🎛️ Filter the Data")
+    st.sidebar.header(" Filter the Data")
 
     filter_options = {}
     # Define columns available for filtering (use cleaned names)
@@ -221,13 +221,13 @@ if df is not None and not df.empty:
         st.warning("Warning: The current filter combination results in no data.")
 
     # --- Create Tabs ---
-    tabs = st.tabs(["📊 Overview", "🧠 Depression Analysis", "💤 Sleep Patterns", "🍎 Dietary Analysis", "🔬 Advanced Analytics"])
+    tabs = st.tabs([" Overview", " Depression Analysis", " Sleep Patterns", " Dietary Analysis", " Advanced Analytics"])
 
 
     # ------------------ OVERVIEW TAB ------------------
     with tabs[0]:
         st.markdown("""
-            <h1 style='text-align: center; color: #7979f8;'>🧠 Mental Health & Lifestyle Dashboard</h1>
+            <h1 style='text-align: center; color: #7979f8;'> Mental Health & Lifestyle Dashboard</h1>
             <p class='subtitle' style='text-align: center;'>Exploring the relationship between lifestyle factors and mental well-being</p>
             <hr>
         """, unsafe_allow_html=True)
@@ -352,13 +352,13 @@ if df is not None and not df.empty:
     # ----------------- DEPRESSION ANALYSIS TAB -----------------
     with tabs[1]:
         st.markdown("""
-            <h2 style='text-align: center; color: #7979f8;'>🧠 Depression Analysis</h2>
+            <h2 style='text-align: center; color: #7979f8;'> Depression Analysis</h2>
             <p class='subtitle' style='text-align: center;'>Factors related to depression (Full Data Analysis)</p>
             <hr>
         """, unsafe_allow_html=True)
 
         # --- Prepare Full Dataset for Modeling ---
-        st.markdown("### 📉 Depression Predictors (Full Data Analysis)")
+        st.markdown("###  Depression Predictors (Full Data Analysis)")
 
         # Define potential predictor columns based on *existing* columns
         potential_predictors = [
@@ -533,7 +533,7 @@ if df is not None and not df.empty:
     # ----------------- SLEEP PATTERNS TAB -----------------
     with tabs[2]:
         st.markdown("""
-            <h2 style='text-align: center; color: #7979f8;'>💤 Sleep Patterns (Categorical)</h2>
+            <h2 style='text-align: center; color: #7979f8;'> Sleep Patterns (Categorical)</h2>
             <p class='subtitle' style='text-align: center;'>Analyzing sleep duration categories and relationships</p>
             <hr>
         """, unsafe_allow_html=True)
@@ -543,7 +543,7 @@ if df is not None and not df.empty:
         col_s1, col_s2 = st.columns(2)
 
         with col_s1:
-            st.markdown("### 📊 Sleep Category Distribution")
+            st.markdown("###  Sleep Category Distribution")
             if not df_filtered.empty and sleep_col in df_filtered.columns:
                 sleep_counts = df_filtered[sleep_col].value_counts().reset_index()
                 sleep_counts.columns = [sleep_col, 'Count'] # Rename columns after reset_index
@@ -560,7 +560,7 @@ if df is not None and not df.empty:
 
 
         with col_s2:
-             st.markdown(f"### 🧠 Depression Rate by {sleep_col}")
+             st.markdown(f"###  Depression Rate by {sleep_col}")
              if not df_filtered.empty and sleep_col in df_filtered.columns and depression_col in df_filtered.columns:
                  sleep_dep = df_filtered.groupby(sleep_col, observed=True)[depression_col].mean().reset_index()
                  sleep_dep['Depression Rate'] = sleep_dep[depression_col] * 100
@@ -576,7 +576,7 @@ if df is not None and not df.empty:
              else: st.info("Sleep Duration or Depression column missing or no data after filtering.")
 
 
-        st.markdown(f"### 🔄 {sleep_col} vs Other Factors")
+        st.markdown(f"###  {sleep_col} vs Other Factors")
         if not df_filtered.empty and sleep_col in df_filtered.columns:
              # Compare sleep categories against numeric variables using box plots
              potential_comp_cols = ['Age', 'CGPA', 'Academic Pressure', 'Work Pressure', 'Study Satisfaction', 'Job Satisfaction', 'Work/Study Hours', 'Financial Stress']
@@ -600,7 +600,7 @@ if df is not None and not df.empty:
     # ----------------- DIETARY ANALYSIS TAB -----------------
     with tabs[3]:
         st.markdown("""
-            <h2 style='text-align: center; color: #7979f8;'>🍎 Dietary Analysis</h2>
+            <h2 style='text-align: center; color: #7979f8;'> Dietary Analysis</h2>
             <p class='subtitle' style='text-align: center;'>Dietary habits and their impact</p>
             <hr>
         """, unsafe_allow_html=True)
@@ -610,7 +610,7 @@ if df is not None and not df.empty:
         col_d1, col_d2 = st.columns(2)
 
         with col_d1:
-            st.markdown(f"### 🍲 {diet_col} Distribution")
+            st.markdown(f"###  {diet_col} Distribution")
             if not df_filtered.empty and diet_col in df_filtered.columns:
                 diet_counts = df_filtered[diet_col].value_counts().reset_index()
                 diet_counts.columns = [diet_col, 'Count'] # Rename after reset_index
@@ -625,7 +625,7 @@ if df is not None and not df.empty:
             else: st.info("Dietary Habits column missing or no data after filtering.")
 
         with col_d2:
-            st.markdown(f"### 🧠 Depression by {diet_col}")
+            st.markdown(f"###  Depression by {diet_col}")
             if not df_filtered.empty and diet_col in df_filtered.columns and depression_col in df_filtered.columns:
                  diet_dep = df_filtered.groupby(diet_col, observed=True)[depression_col].mean().reset_index()
                  diet_dep['Depression Rate'] = diet_dep[depression_col] * 100
@@ -640,7 +640,7 @@ if df is not None and not df.empty:
                  else: st.info(f"No data for Depression by {diet_col} after filtering.")
             else: st.info("Dietary Habits or Depression column missing or no data after filtering.")
 
-        st.markdown(f"### 🔄 {diet_col} and Other Factors")
+        st.markdown(f"### {diet_col} and Other Factors")
         if not df_filtered.empty and diet_col in df_filtered.columns:
              # Compare diet against numeric variables
              potential_comp_cols_diet = ['Age', 'CGPA', 'Academic Pressure', 'Work Pressure', 'Study Satisfaction', 'Job Satisfaction', 'Work/Study Hours', 'Financial Stress']
@@ -663,12 +663,12 @@ if df is not None and not df.empty:
     # ----------------- ADVANCED ANALYTICS TAB -----------------
     with tabs[4]:
         st.markdown("""
-            <h2 style='text-align: center; color: #7979f8;'>🔬 Advanced Analytics</h2>
+            <h2 style='text-align: center; color: #7979f8;'> Advanced Analytics</h2>
             <p class='subtitle' style='text-align: center;'>Correlations and multivariate views (Filtered Data)</p>
             <hr>
         """, unsafe_allow_html=True)
 
-        st.markdown("### 🔄 Correlation Matrix (Numeric Variables)")
+        st.markdown("###  Correlation Matrix (Numeric Variables)")
         if not df_filtered.empty:
              # Select numeric columns available in the filtered data
              numeric_cols_filtered = df_filtered.select_dtypes(include=np.number).columns.tolist()
@@ -692,7 +692,7 @@ if df is not None and not df.empty:
         else: st.info("No data available based on current filters.")
 
 
-        st.markdown("### 🌟 Multivariate Analysis (3D Scatter)")
+        st.markdown("### Multivariate Analysis (3D Scatter)")
         if not df_filtered.empty:
              # Use available numeric columns from filtered data
              scatter_cols_3d = numeric_cols_filtered # Use the list from correlation
