@@ -82,7 +82,33 @@ def load_data(file_path="Analytica Dataset.csv"):
     elif 'Id' in df.columns: # Check common variations
          df.drop(columns=['Id'], inplace=True)
 
+    values_to_remove = [
+    "'Less Delhi'",
+    3,
+    "'Less than 5 Kalyan'",
+    'Saanvi',
+    'M.Tech',
+    'Bhavna',
+    'Mira',
+    'Harsha',
+    'Vaanya',
+    'Gaurav',
+    'Harsh',
+    'Reyansh',
+    'Kibara',
+    'Rashi',
+    'ME',
+    'M.Com',
+    'Nalyan',
+    'Mihir',
+    'Nalini',
+    'Nandini',
+    'Khaziabad',
+    0
+    ]
 
+    df = df[~df['City'].astype(str).isin([str(v) for v in values_to_remove])]
+    
     # --- Handle Data Types and Initial NaNs ---
     # Convert potential numeric columns
     for col in numeric_cols:
