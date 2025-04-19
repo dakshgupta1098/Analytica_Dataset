@@ -821,6 +821,6 @@ else:
     st.sidebar.info("Dashboard reflects data based on selected filters, except for Regression/Feature Importance which uses the full dataset.")
 
 
-else:
+#else:
     # This block runs if df is None or empty after load_data()
-    st.error("Dashboard cannot be displayed: Data loading failed or the file is empty.")
+    #st.error("Dashboard cannot be displayed: Data loading failed or the file is empty.")
