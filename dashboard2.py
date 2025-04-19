@@ -436,6 +436,15 @@ if df is not None and not df.empty:
              # Replace with your actual ordered categories for Work/Study Hours
             work_study_hours_order = [0,1,2,3,4,5,6,7,8,9,10,11,12] # Placeholder!
             category_definitions['Work/Study Hours'] = work_study_hours_order
+        for index, row in df.iterrows():
+            if row['Financial Stress'] == '?':
+              # Count the occurrences of each value in the entire row
+              value_counts = Counter(row.values)
+              # Get the most frequent value (mode)
+              most_frequent = value_counts.most_common(1)[0][0]
+              # Replace '?' with the mode in the 'Financial Stress' column for the current row
+              df.loc[index, 'Financial Stress'] = most_frequent
+
         if 'Financial Stress' in ordinal_cols:
              # Replace with your actual ordered categories for Financial Stress
             financial_stress_order = ['?',1,2,3,4,5] # Placeholder!
