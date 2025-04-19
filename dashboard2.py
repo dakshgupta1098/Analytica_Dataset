@@ -6,365 +6,366 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OrdinalEncoder, OneHotEncoder
 from sklearn.ensemble import RandomForestClassifier
-from scipy import stats
-import warnings
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split # If needed elsewhere
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-
-# Suppress specific warnings if needed (e.g., from statsmodels)
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning, module='seaborn')
-warnings.filterwarnings("ignore", message="X does not have valid feature names, but RandomForestClassifier was fitted with feature names")
-
+from statsmodels.tools.sm_exceptions import PerfectSeparationError # For specific Logit error
+import warnings
+import traceback # For detailed error logging if needed
 
 # --- Configuration ---
 st.set_page_config(layout="wide", page_title="Mental Health Analytics", page_icon="")
+
+# Suppress common warnings (use cautiously)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning, module='seaborn')
+warnings.filterwarnings("ignore", message="X does not have valid feature names, but RandomForestClassifier was fitted with feature names")
+warnings.filterwarnings("ignore", message="The figure layout has changed to tight") # Matplotlib/Seaborn
+
+# --- Custom CSS ---
 st.markdown("""
     <style>
-        /* Your CSS remains the same */
-        .main {background-color: #0e1117;}
-        /* ... other styles ... */
-         .metric-card {background-color: #1f2937; border-radius: 10px; padding: 15px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);}
-        .metric-value {font-size: 24px; font-weight: bold; color: #7979f8;}
-        .metric-label {font-size: 14px; color: #d1d5db;}
-        .subtitle {font-size: 18px; color: #d1d5db; margin-top: -5px; margin-bottom: 15px;}
-        hr {margin: 15px 0px;}
+        .main { background-color: #0e1117; }
+        .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: #1f2937;
+            border-radius: 4px 4px 0px 0px;
+            gap: 1px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            color: #d1d5db; /* Light gray text */
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #7979f8; /* Purple for selected tab */
+            color: white;
+            font-weight: bold;
+        }
+        .metric-card {
+            background-color: #1f2937;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px; /* Add space below cards */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            border: 1px solid #374151; /* Subtle border */
+            height: 100px; /* Fixed height for alignment */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .metric-label { font-size: 14px; color: #9ca3af; /* Slightly darker gray */ margin-bottom: 5px; }
+        .metric-value { font-size: 24px; font-weight: bold; color: #7979f8; line-height: 1.2; }
+        .subtitle { font-size: 18px; color: #d1d5db; margin-top: -5px; margin-bottom: 15px; }
+        hr { border-top: 1px solid #374151; margin: 20px 0px; } /* Style horizontal rule */
+        h1, h2, h3, h4, h5, h6 { color: #e5e7eb; } /* Lighter headings */
+        .stPlotlyChart { border-radius: 8px; overflow: hidden; } /* Style Plotly charts */
     </style>
 """, unsafe_allow_html=True)
 
-# --- Data Loading and Preprocessing ---
+# --- Robust Data Loading and Initial Cleaning ---
 @st.cache_data
-def load_data(file_path="Analytica Dataset.csv"):
+def load_and_prepare_data(file_path="Analytica Dataset.csv"):
+    """Loads, cleans, and prepares the dataset."""
+    st.write(f"Attempting to load data from: {file_path}")
     try:
         df = pd.read_csv(file_path)
-        st.success(f"Successfully loaded data from {file_path}")
+        st.success(f"Successfully loaded data. Found {len(df)} rows and {len(df.columns)} columns initially.")
     except FileNotFoundError:
-        st.error(f"Error: File not found at {file_path}. Please ensure 'Analytica Dataset.csv' is in the same directory or provide the correct path.")
+        st.error(f"Fatal Error: File not found at '{file_path}'. Please ensure the file exists in the correct location.")
+        return None
+    except pd.errors.EmptyDataError:
+        st.error(f"Fatal Error: The file '{file_path}' is empty.")
         return None
     except Exception as e:
-        st.error(f"An error occurred while loading the data: {e}")
+        st.error(f"Fatal Error during file loading: {e}")
         return None
 
-    # Clean column names FIRST - Just strip whitespace
-    original_columns = df.columns.tolist()
-    df.columns = df.columns.str.strip()
-    cleaned_columns = df.columns.tolist()
+    # --- Basic Cleaning ---
+    df.columns = df.columns.str.strip() # Clean column names first
+    st.write("Cleaned Column Names:", df.columns.tolist())
 
-    # Debug: Show original vs cleaned names if they changed
-    if original_columns != cleaned_columns:
-         st.write("Original Columns:", original_columns)
-         st.write("Cleaned Columns:", cleaned_columns)
+    # Drop ID column if it exists (common variations)
+    id_cols_to_drop = [col for col in df.columns if col.lower() == 'id']
+    if id_cols_to_drop:
+        df.drop(columns=id_cols_to_drop, inplace=True)
+        st.write(f"Dropped ID column(s): {id_cols_to_drop}")
+
+    # Remove specific unwanted values in 'City' (More robustly)
+    values_to_remove_city = [
+        "'Less Delhi'", "3", "'Less than 5 Kalyan'", 'Saanvi', 'M.Tech', 'Bhavna', 'Mira',
+        'Harsha', 'Vaanya', 'Gaurav', 'Harsh', 'Reyansh', 'Kibara', 'Rashi', 'ME',
+        'M.Com', 'Nalyan', 'Mihir', 'Nalini', 'Nandini', 'Khaziabad', "0"
+    ]
+    if 'City' in df.columns:
+        initial_rows = len(df)
+        df['City_str'] = df['City'].astype(str).str.strip() # Work on string version
+        df = df[~df['City_str'].isin(values_to_remove_city)]
+        df.drop(columns=['City_str'], inplace=True) # Remove temporary column
+        rows_removed = initial_rows - len(df)
+        if rows_removed > 0:
+            st.write(f"Removed {rows_removed} rows based on specific 'City' values.")
     else:
-         st.write("Cleaned Column Names:", cleaned_columns) # Still useful to see
+        st.warning("Column 'City' not found for specific value removal.")
 
-
-    # --- Define Columns based *only* on the provided image/list ---
-    # !! IMPORTANT: Verify these names exactly match your CSV header after stripping whitespace !!
-    numeric_cols = [
+    # --- Define Column Types (Based on your descriptions) ---
+    # IMPORTANT: Verify these lists match your actual data columns after cleaning
+    expected_numeric_cols = [
         'Age', 'Academic Pressure', 'Work Pressure', 'CGPA',
         'Study Satisfaction', 'Job Satisfaction',
         'Work/Study Hours', 'Financial Stress'
     ]
-    categorical_cols = [
-        'Gender', 'City', 'Profession', 'Sleep Duration', # Sleep Duration is CATEGORICAL
+    expected_categorical_cols = [
+        'Gender', 'City', 'Profession', 'Sleep Duration',
         'Dietary Habits', 'Degree'
     ]
-    # Ensure correct casing and spacing from your actual file
-    yes_no_cols = [
+    expected_yes_no_cols = [
         'Have you ever had suicidal thoughts ?',
         'Family History of Mental Illness',
         'Depression' # Target variable
     ]
+    target_col = 'Depression' # Explicitly define target
 
-    for col in numeric_cols:
-        if col in df.columns: # Check if column exists
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        else:
-            print(f"Warning: Column '{col}' not found in DataFrame.")
-
-    # Drop rows where *any* of the specified columns became NaN after conversion
-    df.dropna(subset=numeric_cols, inplace=True)
-
-
-    # Drop ID column if it exists (use cleaned name)
-    if 'id' in df.columns:
-        df.drop(columns=['id'], inplace=True)
-    elif 'Id' in df.columns: # Check common variations
-         df.drop(columns=['Id'], inplace=True)
-
-    values_to_remove = [
-    "'Less Delhi'",
-    3,
-    "'Less than 5 Kalyan'",
-    'Saanvi',
-    'M.Tech',
-    'Bhavna',
-    'Mira',
-    'Harsha',
-    'Vaanya',
-    'Gaurav',
-    'Harsh',
-    'Reyansh',
-    'Kibara',
-    'Rashi',
-    'ME',
-    'M.Com',
-    'Nalyan',
-    'Mihir',
-    'Nalini',
-    'Nandini',
-    'Khaziabad',
-    0
-    ]
-
-    df = df[~df['City'].astype(str).isin([str(v) for v in values_to_remove])]
-    
-    # --- Handle Data Types and Initial NaNs ---
-    # Convert potential numeric columns
-    for col in numeric_cols:
+    # --- Type Conversion and Imputation ---
+    st.write("--- Data Type Conversion and Imputation ---")
+    actual_numeric_cols = []
+    for col in expected_numeric_cols:
         if col in df.columns:
+            original_dtype = df[col].dtype
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            if df[col].isnull().any():
+            nan_count = df[col].isnull().sum()
+            if nan_count > 0:
                 median_val = df[col].median()
                 df[col].fillna(median_val, inplace=True)
-                # st.write(f"Imputed NaNs in numeric '{col}' with median ({median_val}).")
+                # st.write(f"Numeric '{col}': Converted (originally {original_dtype}). Imputed {nan_count} NaNs with median ({median_val:.2f}).")
+            else:
+                # st.write(f"Numeric '{col}': Converted (originally {original_dtype}). No NaNs found.")
+                actual_numeric_cols.append(col)
         else:
-            st.warning(f"Expected numeric column '{col}' not found in data.")
+            st.warning(f"Expected numeric column '{col}' not found.")
 
-    # Convert Yes/No columns to 0/1 (Robustly)
-    for col in yes_no_cols:
+    actual_yes_no_cols = []
+    for col in expected_yes_no_cols:
         if col in df.columns:
-            # First, convert to string to allow .str methods and handle mixed types
-            df[col] = df[col].astype(str)
-            # Apply string cleaning
-            df[col] = df[col].str.strip().str.lower()
-            # Define mapping for common variations + already numeric/boolean
+            original_dtype = df[col].dtype
+            df[col] = df[col].astype(str).str.strip().str.lower()
             mapping = {'yes': 1, 'no': 0, '1': 1, '0': 0, '1.0': 1, '0.0': 0, 'true': 1, 'false': 0}
-            # Map values, keep track of original NaNs (now 'nan' string)
-            original_nan_mask = df[col] == 'nan'
-            df[col] = df[col].map(mapping)
-            # Impute NaNs (both original and those from failed mapping) with mode
-            if df[col].isnull().any():
-                mode_val = df[col].mode()[0] if not df[col].mode().empty else 0 # Default to 0 if mode fails
+            df[col] = df[col].map(mapping) # Apply mapping
+            nan_count = df[col].isnull().sum()
+            if nan_count > 0:
+                try:
+                    mode_val = df[col].mode()[0] if not df[col].mode().empty else 0
+                except IndexError:
+                    mode_val = 0 # Fallback if mode calculation fails
                 df[col].fillna(mode_val, inplace=True)
-                # st.write(f"Imputed NaNs/unmapped in Yes/No '{col}' with mode ({mode_val}).")
-            df[col] = df[col].astype(int) # Ensure final type is integer
+                # st.write(f"Yes/No '{col}': Mapped & Int Converted (originally {original_dtype}). Imputed {nan_count} NaNs/unmapped with mode ({mode_val}).")
+            else:
+                # st.write(f"Yes/No '{col}': Mapped & Int Converted (originally {original_dtype}). No NaNs/unmapped found.")
+                df[col] = df[col].astype(int) # Final conversion to integer
+                actual_yes_no_cols.append(col)
         else:
-            st.warning(f"Expected Yes/No column '{col}' not found in data.")
+            st.warning(f"Expected Yes/No column '{col}' not found.")
 
-    # Convert other categorical columns to 'category' type and impute NaNs
-    for col in categorical_cols:
+    # Target Variable Check (Crucial!)
+    if target_col in actual_yes_no_cols:
+        if not df[target_col].isin([0, 1]).all():
+            st.error(f"Fatal Error: Target column '{target_col}' contains values other than 0 or 1 after cleaning. Cannot proceed with modeling.")
+            st.dataframe(df[~df[target_col].isin([0, 1])]) # Show problematic rows
+            return None
+        else:
+            st.write(f"Target column '{target_col}' successfully validated as binary (0/1).")
+    else:
+         st.error(f"Fatal Error: Target column '{target_col}' not found or not processed correctly. Check column names and types.")
+         return None
+
+
+    actual_categorical_cols = []
+    for col in expected_categorical_cols:
         if col in df.columns:
-            if df[col].isnull().any():
-                 # Impute categorical NaNs (replace with 'Unknown')
-                 df[col].fillna('Unknown', inplace=True)
-                 # st.write(f"Imputed NaNs in categorical '{col}' with 'Unknown'.")
-            # Convert to string first to ensure consistency before category conversion
-            df[col] = df[col].astype(str).astype('category')
+            original_dtype = df[col].dtype
+            nan_count = df[col].isnull().sum()
+            # Convert to string first for consistent imputation/categorization
+            df[col] = df[col].astype(str)
+            if nan_count > 0:
+                df[col].replace(['nan', 'NaN', 'None', '', ' '], 'Unknown', inplace=True) # Handle various forms of missing explicitly
+                df[col].fillna('Unknown', inplace=True) # Catch any remaining standard NaNs
+                # st.write(f"Categorical '{col}': Type Str (originally {original_dtype}). Imputed {nan_count} missing values with 'Unknown'.")
+            # Convert to category type after imputation
+            df[col] = df[col].astype('category')
+            actual_categorical_cols.append(col)
         else:
-             st.warning(f"Expected categorical column '{col}' not found in data.")
+            st.warning(f"Expected categorical column '{col}' not found.")
 
-    # Define age bins and labels - Use the cleaned numeric 'Age'
-    if 'Age' in df.columns and pd.api.types.is_numeric_dtype(df['Age']):
-        # Make bins slightly wider to catch edges if needed
+    # --- Feature Engineering: Age Range ---
+    if 'Age' in actual_numeric_cols:
         max_age = df['Age'].max()
+        # Adjusted bins to be more inclusive, handle potential float ages
         bins = [0, 17, 24, 34, 44, 54, 64, 100]
         labels = ['<18', '18-24', '25-34', '35-44', '45-54', '55-64', '65+']
-        df['AgeRange'] = pd.cut(df['Age'], bins=bins, labels=labels, right=False)
-        if df['AgeRange'].isnull().any():
-            df['AgeRange'].fillna('Unknown', inplace=True)
-            # st.write("Imputed NaNs in 'AgeRange' with 'Unknown'.")
-        df['AgeRange'] = df['AgeRange'].astype('category')
-        # Add 'AgeRange' to categorical list if created successfully
-        if 'AgeRange' not in categorical_cols:
-            categorical_cols.append('AgeRange')
+        try:
+            df['AgeRange'] = pd.cut(df['Age'], bins=bins, labels=labels, right=True) # Use right=True typically
+            if df['AgeRange'].isnull().any():
+                df['AgeRange'].fillna('Unknown', inplace=True)
+            df['AgeRange'] = df['AgeRange'].astype('category')
+            actual_categorical_cols.append('AgeRange') # Add to list if created
+            st.write("Created 'AgeRange' category from 'Age'.")
+        except Exception as e:
+            st.warning(f"Could not create 'AgeRange': {e}")
     else:
-        st.warning("Numeric column 'Age' not found or not numeric, cannot create 'AgeRange'.")
+        st.warning("Numeric column 'Age' not found or not processed, cannot create 'AgeRange'.")
 
 
-    # Ensure target variable 'Depression' is integer type after mapping/filling
-    if 'Depression' in df.columns:
-         df['Depression'] = df['Depression'].astype(int)
+    st.success("--- Data Loading and Preprocessing Complete ---")
+    # st.write("Final Data Info:")
+    # st.write(df.info())
+    # st.write("Sample Data:")
+    # st.dataframe(df.head())
 
-    st.write("--- Data Loading and Preprocessing Complete ---")
-    # st.write(df.head()) # Optional: Display first few rows after cleaning
-    # st.write(df.info()) # Optional: Display data types and non-null counts
-    return df
+    # Final Check: Ensure dataframe is not empty
+    if df.empty:
+        st.error("Fatal Error: Dataframe became empty after cleaning and preprocessing.")
+        return None
+
+    return df, actual_numeric_cols, actual_categorical_cols, actual_yes_no_cols, target_col
 
 # --- Load Data ---
-df = load_data() # Use default path or specify another
+loaded_data = load_and_prepare_data() # Use default path
 
 # --- Main App Logic ---
-if df is not None and not df.empty:
+if loaded_data:
+    df, actual_numeric_cols, actual_categorical_cols, actual_yes_no_cols, target_col = loaded_data
+    st.write(f"Proceeding with dashboard using {len(df)} processed rows.")
 
     # --- Sidebar Filters ---
-    st.sidebar.header(" Filter the Data")
-
-    filter_options = {}
-    # Define columns available for filtering (use cleaned names)
-    # Use only columns confirmed to exist after loading/cleaning
-    possible_filter_cols = ['Gender', 'City', 'Profession', 'AgeRange',
-                            'Dietary Habits', 'Degree', 'Sleep Duration'] # Sleep Duration is categorical
-
-    for col in possible_filter_cols:
-        if col in df.columns:
-            unique_values = df[col].dropna().unique()
-            # Ensure options are strings for multiselect
-            options = sorted([str(item) for item in unique_values])
-            if options:
-                 filter_options[col] = options
+    st.sidebar.header(" Filter Dashboard Views")
+    # Use only categorical columns that actually exist for filtering
+    filter_cols = [col for col in ['Gender', 'City', 'Profession', 'AgeRange', 'Dietary Habits', 'Degree', 'Sleep Duration'] if col in actual_categorical_cols]
 
     filters = {}
-    for col, options in filter_options.items():
-         # Default to selecting all options
-        filters[col] = st.sidebar.multiselect(f"Filter by {col}", options, default=options)
+    if not filter_cols:
+        st.sidebar.warning("No categorical columns available for filtering.")
+    else:
+        for col in filter_cols:
+            # Convert unique values to string, sort, and handle potential errors
+            try:
+                unique_values = df[col].dropna().unique().astype(str)
+                options = sorted(list(unique_values))
+                if options:
+                    filters[col] = st.sidebar.multiselect(f"Filter by {col}", options, default=options)
+                else:
+                     st.sidebar.info(f"No unique values found for '{col}' to filter.")
+            except Exception as e:
+                st.sidebar.error(f"Error setting up filter for '{col}': {e}")
 
-    # Filter the data - Apply filters cumulatively
+
+    # --- Filter Data for Visualizations (Carefully) ---
     df_filtered = df.copy()
-    for col, selected_str_options in filters.items():
-         if selected_str_options: # Only filter if options are selected
-            # Filter using string representation for robustness as options are strings
-            df_filtered = df_filtered[df_filtered[col].astype(str).isin(selected_str_options)]
+    if filters:
+        for col, selected_options in filters.items():
+            if selected_options and col in df_filtered.columns:
+                # Ensure we compare string representations if options are strings
+                try:
+                    df_filtered = df_filtered[df_filtered[col].astype(str).isin(selected_options)]
+                except Exception as e:
+                     st.warning(f"Could not apply filter for '{col}': {e}")
+                     # Continue without this filter if it fails
+            # else: # Handle case where filter is defined but no options selected (means select all)
+            #     pass # Keep all data for this filter if nothing is selected
 
-    # Display warning if filters result in empty data
-    if df_filtered.empty:
-        st.warning("Warning: The current filter combination results in no data.")
+    if df_filtered.empty and not df.empty: # Only warn if filters caused emptiness
+        st.warning("Warning: The current filter combination results in no data for visualizations.")
+        # Optionally, reset to full data for viewing: df_filtered = df.copy()
 
     # --- Create Tabs ---
-    tabs = st.tabs([" Overview", " Depression Analysis", " Sleep Patterns", " Dietary Analysis", " Advanced Analytics"])
-
+    tab_titles = ["Overview", " Depression Analysis", " Sleep Patterns", " Dietary Analysis", " Advanced Analytics"]
+    tabs = st.tabs(tab_titles)
 
     # ------------------ OVERVIEW TAB ------------------
     with tabs[0]:
-        st.markdown("""
-            <h1 style='text-align: center; color: #7979f8;'> Mental Health & Lifestyle Dashboard</h1>
-            <p class='subtitle' style='text-align: center;'>Exploring the relationship between lifestyle factors and mental well-being</p>
-            <hr>
-        """, unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center; color: #7979f8;'>Mental Health & Lifestyle Dashboard</h1>", unsafe_allow_html=True)
+        st.markdown("<p class='subtitle' style='text-align: center;'>Exploring relationships between lifestyle and mental well-being</p><hr>", unsafe_allow_html=True)
+
+        # Use df_filtered for overview KPIs
+        display_df = df if df_filtered.empty else df_filtered # Use original df if filtering leads to empty
 
         col1, col2, col3, col4 = st.columns(4)
 
-        # --- Calculate KPIs (Adapt for available columns) ---
-        total_responses = len(df_filtered) if not df_filtered.empty else 0
-
-        # Use the cleaned target column name 'Depression'
-        depression_col = 'Depression'
-        depression_rate = 0
-        if depression_col in df_filtered.columns and not df_filtered.empty:
-             depression_rate = 100 * df_filtered[depression_col].mean()
-
-        # Sleep Duration KPI - Mode or Count Plot
-        sleep_col = 'Sleep Duration'
+        # --- Calculate KPIs ---
+        total_responses = len(display_df)
+        depression_rate = 100 * display_df[target_col].mean() if target_col in display_df.columns else 0
         most_common_sleep = "N/A"
-        if sleep_col in df_filtered.columns and not df_filtered.empty:
-             try:
-                  most_common_sleep = df_filtered[sleep_col].mode()[0]
-             except IndexError: # Handle empty Series case after filtering
-                  most_common_sleep = "N/A"
-
-
-        # Use 'Financial Stress' as a proxy for stress/wellbeing KPI
-        stress_col = 'Financial Stress' # Example using an existing numeric col
-        avg_financial_stress = 0
-        if stress_col in df_filtered.columns and not df_filtered.empty:
-              avg_financial_stress = df_filtered[stress_col].mean()
-
+        if 'Sleep Duration' in display_df.columns and not display_df['Sleep Duration'].empty:
+            try:
+                most_common_sleep = display_df['Sleep Duration'].mode()[0]
+            except IndexError: pass # Handle empty mode
+        avg_financial_stress = display_df['Financial Stress'].mean() if 'Financial Stress' in display_df.columns else None
+        stress_display = f"{avg_financial_stress:.1f}" if avg_financial_stress is not None and not np.isnan(avg_financial_stress) else "N/A"
 
         # --- Display KPIs ---
-        with col1:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-label">Total Responses</p>
-                    <p class="metric-value">{total_responses}</p>
-                </div>
-            """, unsafe_allow_html=True)
+        with col1: st.markdown(f'<div class="metric-card"><p class="metric-label">Total Responses</p><p class="metric-value">{total_responses}</p></div>', unsafe_allow_html=True)
+        with col2: st.markdown(f'<div class="metric-card"><p class="metric-label">Depression Rate</p><p class="metric-value">{depression_rate:.1f}%</p></div>', unsafe_allow_html=True)
+        with col3: st.markdown(f'<div class="metric-card"><p class="metric-label">Most Common Sleep</p><p class="metric-value" style="font-size: 18px;">{most_common_sleep}</p></div>', unsafe_allow_html=True)
+        with col4: st.markdown(f'<div class="metric-card"><p class="metric-label">Avg Financial Stress</p><p class="metric-value">{stress_display}</p></div>', unsafe_allow_html=True)
 
-        with col2:
-             st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-label">Depression Rate</p>
-                    <p class="metric-value">{depression_rate:.1f}%</p>
-                </div>
-            """, unsafe_allow_html=True)
-
-        with col3:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-label">Most Common Sleep</p>
-                    <p class="metric-value" style="font-size: 18px;">{most_common_sleep}</p>
-                </div>
-            """, unsafe_allow_html=True)
-
-        with col4:
-             stress_display = f"{avg_financial_stress:.1f}" if avg_financial_stress is not None and not np.isnan(avg_financial_stress) else "N/A"
-             st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-label">Avg Financial Stress</p>
-                     <p class="metric-value">{stress_display}</p>
-                </div>
-            """, unsafe_allow_html=True)
-
-
-        st.markdown("###  Depression Rate by Demographics")
+        st.markdown("### Depression Rate by Demographics")
         col_d1, col_d2 = st.columns(2)
 
+        # Gender Plot
         with col_d1:
             st.markdown("##### By Gender")
-            gender_col = 'Gender'
-            if not df_filtered.empty and gender_col in df_filtered.columns and depression_col in df_filtered.columns:
-                # Ensure observed=False if 'Gender' is categorical
-                gender_dep = df_filtered.groupby(gender_col, observed=True)[depression_col].mean().reset_index()
-                gender_dep[depression_col] = gender_dep[depression_col] * 100
-                if not gender_dep.empty:
-                    fig = px.bar(gender_dep, x=gender_col, y=depression_col, text_auto='.1f',
-                                 title="Depression Rate by Gender (%)",
-                                 color=depression_col, color_continuous_scale='Bluered',
-                                 labels={depression_col: 'Depression Rate (%)', gender_col: 'Gender'})
-                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=350)
-                    st.plotly_chart(fig, use_container_width=True)
-                else: st.info("No data to plot for Gender vs Depression after filtering.")
-            else: st.info("Gender or Depression column missing or no data after filtering.")
+            if not display_df.empty and 'Gender' in display_df.columns:
+                try:
+                    gender_dep = display_df.groupby('Gender', observed=True)[target_col].mean().reset_index()
+                    gender_dep['Depression Rate (%)'] = gender_dep[target_col] * 100
+                    if not gender_dep.empty:
+                        fig = px.bar(gender_dep, x='Gender', y='Depression Rate (%)', text_auto='.1f',
+                                     color='Depression Rate (%)', color_continuous_scale='Bluered',
+                                     labels={'Gender': 'Gender', 'Depression Rate (%)': 'Depression Rate (%)'})
+                        fig.update_layout(title="Depression Rate by Gender", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=350)
+                        st.plotly_chart(fig, use_container_width=True)
+                    else: st.info("No aggregated data for Gender vs Depression.")
+                except Exception as e: st.warning(f"Could not plot Gender vs Depression: {e}")
+            else: st.info("Required columns ('Gender', 'Depression') missing or no data.")
 
+        # AgeRange Plot
         with col_d2:
             st.markdown("##### By Age Range")
-            age_range_col = 'AgeRange'
-            if not df_filtered.empty and age_range_col in df_filtered.columns and depression_col in df_filtered.columns:
-                age_order = ['<18', '18-24', '25-34', '35-44', '45-54', '55-64', '65+', 'Unknown']
-                # Ensure the column is categorical with the correct order
-                df_filtered[age_range_col] = pd.Categorical(df_filtered[age_range_col].astype(str), categories=age_order, ordered=True)
-                age_dep = df_filtered.groupby(age_range_col, observed=False)[depression_col].mean().reset_index()
-                age_dep[depression_col] = age_dep[depression_col] * 100
-                if not age_dep.empty:
-                    fig = px.bar(age_dep, x=age_range_col, y=depression_col, text_auto='.1f',
-                                 title="Depression Rate by Age Range (%)",
-                                 color=depression_col, color_continuous_scale='Bluered',
-                                 labels={depression_col: 'Depression Rate (%)', age_range_col: 'Age Range'})
-                    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=350)
+            if not display_df.empty and 'AgeRange' in display_df.columns:
+                try:
+                    age_order = ['<18', '18-24', '25-34', '35-44', '45-54', '55-64', '65+', 'Unknown']
+                    display_df['AgeRange'] = pd.Categorical(display_df['AgeRange'].astype(str), categories=age_order, ordered=True)
+                    age_dep = display_df.groupby('AgeRange', observed=False)[target_col].mean().reset_index()
+                    age_dep['Depression Rate (%)'] = age_dep[target_col] * 100
+                    if not age_dep.empty:
+                        fig = px.bar(age_dep, x='AgeRange', y='Depression Rate (%)', text_auto='.1f',
+                                     color='Depression Rate (%)', color_continuous_scale='Bluered',
+                                     labels={'AgeRange': 'Age Range', 'Depression Rate (%)': 'Depression Rate (%)'})
+                        fig.update_layout(title="Depression Rate by Age Range", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=350)
+                        st.plotly_chart(fig, use_container_width=True)
+                    else: st.info("No aggregated data for Age Range vs Depression.")
+                except Exception as e: st.warning(f"Could not plot Age Range vs Depression: {e}")
+            else: st.info("Required columns ('AgeRange', 'Depression') missing or no data.")
+
+        # Profession Treemap
+        st.markdown("### Depression & Profession Breakdown")
+        if not display_df.empty and 'Profession' in display_df.columns:
+            try:
+                dep_prof = display_df.groupby(['Profession', target_col], observed=True).size().reset_index(name='count')
+                dep_prof['Depression_Status'] = dep_prof[target_col].map({1: 'Depressed', 0: 'Not Depressed'})
+                if not dep_prof.empty:
+                    fig = px.treemap(dep_prof, path=['Profession', 'Depression_Status'], values='count',
+                                     color='Depression_Status', color_discrete_map={'Depressed': '#e11d48', 'Not Depressed': '#22c55e'}, # Red/Green
+                                     title="Depression Distribution by Profession")
+                    fig.update_layout(margin=dict(t=50, l=25, r=25, b=25), paper_bgcolor='#0e1117', font_color='white')
                     st.plotly_chart(fig, use_container_width=True)
-                else: st.info("No data to plot for Age Range vs Depression after filtering.")
-            else: st.info("AgeRange or Depression column missing or no data after filtering.")
+                else: st.info("No aggregated data for Profession Treemap.")
+            except Exception as e: st.warning(f"Could not plot Profession Treemap: {e}")
+        else: st.info("Required columns ('Profession', 'Depression') missing or no data.")
 
-        st.markdown("###  Depression & Profession Breakdown")
-        profession_col = 'Profession'
-        if not df_filtered.empty and profession_col in df_filtered.columns and depression_col in df_filtered.columns:
-            dep_prof = df_filtered.groupby([profession_col, depression_col], observed=True).size().reset_index(name='count')
-            dep_prof['Depression_Status'] = dep_prof[depression_col].map({1: 'Depressed', 0: 'Not Depressed'})
-            if not dep_prof.empty:
-                fig = px.treemap(dep_prof, path=[profession_col, 'Depression_Status'], values='count',
-                                 color='Depression_Status', color_discrete_map={'Depressed': 'red', 'Not Depressed': 'green'},
-                                 title="Depression Distribution by Profession")
-                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
-                st.plotly_chart(fig, use_container_width=True)
-            else: st.info("No data to plot for Profession Treemap after filtering.")
-        else: st.info("Profession or Depression column missing or no data after filtering.")
 
-    #depression tabbbbbbbbb
+    # ----------------- DEPRESSION ANALYSIS TAB (MODELING) -----------------
     with tabs[1]:
         st.markdown("<h2 style='text-align: center; color: #7979f8;'>Depression Analysis & Predictors</h2>", unsafe_allow_html=True)
         st.markdown("<p class='subtitle' style='text-align: center;'>Modeling using the <strong>full dataset</strong> to identify factors associated with depression</p><hr>", unsafe_allow_html=True)
@@ -415,19 +416,22 @@ if df is not None and not df.empty:
                     ordinal_features = [col for col in ordinal_features_candidates if col in categorical_features]
                     nominal_features = [col for col in categorical_features if col not in ordinal_features]
 
-                
+                    
 
                     # --- Build Preprocessing Pipelines (More Robustly) ---
+                    # --- [Locate this part in your code, within the 'Depression Analysis' tab] ---
+
+                        # --- Build Preprocessing Pipelines (More Robustly) ---
                     transformers = []
 
-                    # Numerical Pipeline
+                        # Numerical Pipeline *** MODIFIED: StandardScaler uncommented ***
                     if numerical_features:
                         num_pipeline = Pipeline(steps=[
                             ('imputer', SimpleImputer(strategy='median')), # Median is robust to outliers
-                            #('scaler', StandardScaler()) # Scaling is often needed for Logit, optional for RF
+                            ('scaler', StandardScaler()) # Scaling is often needed for Logit & helps stability
                         ])
                         transformers.append(('num', num_pipeline, numerical_features))
-
+                        # --- [Rest of your Ordinal and Nominal Pipelines remain the same] ---
                     # Ordinal Pipeline (Auto-detect categories)
                     if ordinal_features:
                         # Get categories directly from data for each ordinal column
@@ -439,21 +443,19 @@ if df is not None and not df.empty:
                                 cats = sorted(X[col].dropna().unique())
                                 ordinal_categories.append(cats)
                                 valid_ordinal_features.append(col)
-                                # st.write(f"Auto-detected categories for '{col}': {cats}")
                             except TypeError: # Cannot sort mixed types
                                 cats = X[col].dropna().unique().tolist()
                                 ordinal_categories.append(cats)
                                 valid_ordinal_features.append(col)
-                                # st.write(f"Auto-detected (unsorted) categories for '{col}': {cats}")
                             except Exception as e:
-                                st.warning(f"Could not auto-detect categories for ordinal feature '{col}': {e}. Skipping.")
+                                 st.warning(f"Could not auto-detect categories for ordinal feature '{col}': {e}. Skipping.")
 
                         if valid_ordinal_features: # Only proceed if we have valid features/categories
-                             ord_pipeline = Pipeline(steps=[
-                                ('imputer', SimpleImputer(strategy='most_frequent')), # Impute before encoding
-                                ('encoder', OrdinalEncoder(categories=ordinal_categories, handle_unknown='use_encoded_value', unknown_value=-1)) # Encode known, map unknown to -1
+                            ord_pipeline = Pipeline(steps=[
+                                 ('imputer', SimpleImputer(strategy='most_frequent')), # Impute before encoding
+                                 ('encoder', OrdinalEncoder(categories=ordinal_categories, handle_unknown='use_encoded_value', unknown_value=-1)) # Encode known, map unknown to -1
                              ])
-                             transformers.append(('ord', ord_pipeline, valid_ordinal_features))
+                            transformers.append(('ord', ord_pipeline, valid_ordinal_features))
 
                     # Nominal Pipeline
                     if nominal_features:
@@ -471,12 +473,12 @@ if df is not None and not df.empty:
                             transformers=transformers,
                             remainder='passthrough' # Keep columns not specified (should be none if lists are correct)
                         )
-
                         st.write("Fitting preprocessor...")
                         X_processed = preprocessor.fit_transform(X)
                         st.write(f"Preprocessing complete. Processed data shape: {X_processed.shape}")
 
                         # --- Get Feature Names After Transformation ---
+                        # [Your existing code for getting feature names and creating X_processed_df]
                         try:
                             feature_names_out = preprocessor.get_feature_names_out()
                             feature_names_cleaned = [name.split('__')[-1] for name in feature_names_out]
@@ -488,41 +490,35 @@ if df is not None and not df.empty:
                         X_processed_df = pd.DataFrame(X_processed, columns=feature_names_cleaned, index=X.index)
 
                         # --- Final Checks on Processed Data ---
-                        # Check for NaNs introduced (e.g., by OrdinalEncoder unknown_value if set to np.nan)
+                        # [Your existing code for checking/imputing NaNs/Infs]
                         nan_check = X_processed_df.isnull().sum()
                         inf_check = np.isinf(X_processed_df).sum()
-
                         if nan_check.sum() > 0 or inf_check.sum() > 0:
-                            st.warning("NaNs or Infs detected *after* initial preprocessing pipelines.")
-                            st.write("NaN counts per column:", nan_check[nan_check > 0])
-                            st.write("Inf counts per column:", inf_check[inf_check > 0])
-
-                            # Impute remaining NaNs/Infs robustly (e.g., with median/0)
-                            # Use SimpleImputer that handles both
-                            final_imputer = SimpleImputer(missing_values=np.nan, strategy='median')
-                            X_processed_df = pd.DataFrame(final_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
-
-                            final_inf_imputer = SimpleImputer(missing_values=np.inf, strategy='constant', fill_value=np.finfo(np.float64).max) # Replace inf with large number
-                            X_processed_df = pd.DataFrame(final_inf_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
-                            final_neg_inf_imputer = SimpleImputer(missing_values=-np.inf, strategy='constant', fill_value=np.finfo(np.float64).min) # Replace -inf
-                            X_processed_df = pd.DataFrame(final_neg_inf_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
-
-                            st.write("Attempted final imputation for remaining NaNs/Infs.")
-                            if X_processed_df.isnull().values.any() or np.isinf(X_processed_df).values.any():
-                                st.error("Fatal Error: NaNs or Infs persist even after final imputation. Cannot fit models.")
-                                X_processed_df = None # Prevent model fitting
+                             st.warning("NaNs or Infs detected *after* initial preprocessing pipelines.")
+                             st.write("NaN counts per column:", nan_check[nan_check > 0])
+                             st.write("Inf counts per column:", inf_check[inf_check > 0])
+                             # Impute remaining NaNs/Infs robustly (e.g., with median/0)
+                             final_imputer = SimpleImputer(missing_values=np.nan, strategy='median')
+                             X_processed_df = pd.DataFrame(final_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
+                             final_inf_imputer = SimpleImputer(missing_values=np.inf, strategy='constant', fill_value=np.finfo(np.float64).max) # Replace inf with large number
+                             X_processed_df = pd.DataFrame(final_inf_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
+                             final_neg_inf_imputer = SimpleImputer(missing_values=-np.inf, strategy='constant', fill_value=np.finfo(np.float64).min) # Replace -inf
+                             X_processed_df = pd.DataFrame(final_neg_inf_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
+                             st.write("Attempted final imputation for remaining NaNs/Infs.")
+                             if X_processed_df.isnull().values.any() or np.isinf(X_processed_df).values.any():
+                                 st.error("Fatal Error: NaNs or Infs persist even after final imputation. Cannot fit models.")
+                                 X_processed_df = None # Prevent model fitting
                         else:
                              st.write("Data successfully preprocessed with no NaNs or Infs detected.")
+
 
                         # ============ Logistic Regression (Statsmodels) ============
                         if X_processed_df is not None:
                             st.markdown("#### Logistic Regression Coefficients")
                             try:
                                 X_logit_final = X_processed_df.copy()
-
                                 # Ensure all columns are float for statsmodels
                                 X_logit_final = X_logit_final.astype(float)
-
                                 # Drop constant columns (low variance)
                                 cols_to_drop_logit = [col for col in X_logit_final.columns if X_logit_final[col].nunique() <= 1]
                                 if cols_to_drop_logit:
@@ -535,55 +531,54 @@ if df is not None and not df.empty:
                                     # Add constant (intercept)
                                     X_const = sm.add_constant(X_logit_final, has_constant='raise') # Raise error if constant already exists
 
-                                    # --- Fit Logit Model ---
-                                    st.write(f"Fitting Logistic Regression model on {X_const.shape[0]} samples and {X_const.shape[1]-1} predictors...")
-                                    log_reg = sm.Logit(y, X_const).fit(disp=0) # disp=0 suppresses convergence messages
+                                # --- Fit Logit Model *** MODIFIED: Added cov_type *** ---
+                                st.write(f"Fitting Logistic Regression model on {X_const.shape[0]} samples and {X_const.shape[1]-1} predictors (using robust covariance)...")
+                                # Using cov_type='HC1' for robustness against heteroscedasticity, might help with numerical issues
+                                log_reg = sm.Logit(y, X_const).fit(method='bfgs', cov_type='HC1', disp=0) # Added cov_type, method='bfgs' can sometimes help convergence
 
-                                    # --- Display Results ---
-                                    coef_df = log_reg.summary2().tables[1]
-                                    if 'const' in coef_df.index:
-                                        coef_df = coef_df.drop('const')
+                                # --- Display Results ---
+                                # [Your existing code for displaying results]
+                                coef_df = log_reg.summary2().tables[1]
+                                if 'const' in coef_df.index:
+                                    coef_df = coef_df.drop('const')
+                                if not coef_df.empty:
+                                            coef_df['abs_coef'] = coef_df['Coef.'].abs()
+                                            coef_df_sorted = coef_df.sort_values(by='abs_coef', ascending=True)
+                                            fig_logit = px.bar(
+                                                coef_df_sorted, x='Coef.', y=coef_df_sorted.index, orientation='h',
+                                                labels={'Coef.': 'Coefficient (Log-Odds)', 'index': 'Predictor Variable'},
+                                                title="Logistic Regression Coefficients (Significant Predictors)",
+                                                color='Coef.', color_continuous_scale='Bluered_r',
+                                                text='Coef.',
+                                            )
+                                            fig_logit.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+                                            fig_logit.update_layout(
+                                                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                                                font_color='white', yaxis_title=None,
+                                                height=max(400, len(coef_df_sorted)*25) # Adjust height dynamically
+                                            )
+                                            st.plotly_chart(fig_logit, use_container_width=True)
 
-                                    if not coef_df.empty:
-                                        coef_df['abs_coef'] = coef_df['Coef.'].abs()
-                                        # Filter out insignificant coefficients if desired (e.g., P>|z| > 0.05)
-                                        # coef_df_significant = coef_df[coef_df['P>|z|'] <= 0.05]
-                                        coef_df_sorted = coef_df.sort_values(by='abs_coef', ascending=True)
+                                            with st.expander("View Full Regression Summary (Statsmodels)"):
+                                                 st.text(log_reg.summary())
+                                            with st.expander("View Coefficient Table"):
+                                                 st.dataframe(coef_df.sort_values(by='abs_coef', ascending=False))
+                                else:
+                                            st.warning("Logistic Regression completed, but no predictor coefficients were generated (excluding constant).")
 
-                                        fig_logit = px.bar(
-                                            coef_df_sorted, x='Coef.', y=coef_df_sorted.index, orientation='h',
-                                            labels={'Coef.': 'Coefficient (Log-Odds)', 'index': 'Predictor Variable'},
-                                            title="Logistic Regression Coefficients (Significant Predictors)",
-                                            color='Coef.', color_continuous_scale='Bluered_r', # Red for positive, Blue for negative
-                                            text='Coef.', # Show coefficient value on bars
-                                        )
-                                        fig_logit.update_traces(texttemplate='%{text:.2f}', textposition='outside')
-                                        fig_logit.update_layout(
-                                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                                            font_color='white', yaxis_title=None,
-                                            height=max(400, len(coef_df_sorted)*25) # Adjust height dynamically
-                                        )
-                                        st.plotly_chart(fig_logit, use_container_width=True)
-
-                                        with st.expander("View Full Regression Summary (Statsmodels)"):
-                                            st.text(log_reg.summary())
-                                        with st.expander("View Coefficient Table"):
-                                            st.dataframe(coef_df.sort_values(by='abs_coef', ascending=False))
-                                    else:
-                                        st.warning("Logistic Regression completed, but no predictor coefficients were generated (excluding constant).")
-
-                            # --- Specific Error Handling for Logit ---
+                                # --- Specific Error Handling for Logit ---
                             except PerfectSeparationError as e:
-                                st.error(f"Logistic Regression Error: Perfect separation detected. {e}")
-                                st.error("This means one or more predictors perfectly predict the outcome for a subset of data. Consider removing predictors or simplifying the model.")
+                                    st.error(f"Logistic Regression Error: Perfect separation detected. {e}")
+                                    st.error("This means one or more predictors perfectly predict the outcome for a subset of data. Consider removing predictors or simplifying the model.")
                             except np.linalg.LinAlgError as e:
-                                st.error(f"Logistic Regression Error: Linear Algebra Error (Likely Multicollinearity). {e}")
-                                st.error("Check for highly correlated predictors using the correlation matrix in 'Advanced Analytics'. Consider removing some predictors.")
-                                # Optional: Add VIF calculation here
+                                     st.error(f"Logistic Regression Error: Linear Algebra Error (Likely Multicollinearity / Singular Matrix). {e}")
+                                     st.error("Scaling and robust covariance applied, but the issue might persist. Consider checking VIF or removing highly correlated predictors manually if this error continues.")
                             except Exception as e:
-                                st.error(f"An unexpected error occurred during Logistic Regression: {e}")
-                                st.error("Check data types, NaN/infinite values (should be handled), and predictor selection.")
-                                # traceback.print_exc() # Uncomment for detailed traceback in console/logs
+                                     st.error(f"An unexpected error occurred during Logistic Regression: {e}")
+                                     st.error("Check data types, NaN/infinite values (should be handled), and predictor selection.")
+                                     # traceback.print_exc() # Uncomment for detailed traceback in console/logs
+
+# --- [Rest of your code, including Random Forest section] ---
 
                         # ============ Feature Importance (Random Forest) ============
                         if X_processed_df is not None:
@@ -639,211 +634,211 @@ if df is not None and not df.empty:
                     st.error(f"An unexpected error occurred during data preparation/modeling setup: {e}")
                     # traceback.print_exc() # Uncomment for detailed traceback
 
-
     # ----------------- SLEEP PATTERNS TAB -----------------
     with tabs[2]:
-        st.markdown("""
-            <h2 style='text-align: center; color: #7979f8;'> Sleep Patterns (Categorical)</h2>
-            <p class='subtitle' style='text-align: center;'>Analyzing sleep duration categories and relationships</p>
-            <hr>
-        """, unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center; color: #7979f8;'>Sleep Patterns Analysis</h2>", unsafe_allow_html=True)
+        st.markdown("<p class='subtitle' style='text-align: center;'>Analyzing sleep duration categories (using filtered data)</p><hr>", unsafe_allow_html=True)
+        sleep_col = 'Sleep Duration'
+        display_df_sleep = df if df_filtered.empty else df_filtered
 
-        sleep_col = 'Sleep Duration' # Use cleaned name
+        if sleep_col not in display_df_sleep.columns:
+             st.warning(f"Column '{sleep_col}' not found in the data.")
+        elif display_df_sleep.empty:
+             st.info("No data available for sleep analysis based on filters.")
+        else:
+            col_s1, col_s2 = st.columns(2)
+            # Sleep Distribution
+            with col_s1:
+                st.markdown("### Sleep Category Distribution")
+                try:
+                    sleep_counts = display_df_sleep[sleep_col].value_counts().reset_index()
+                    sleep_counts.columns = [sleep_col, 'Count'] # Rename columns
+                    if not sleep_counts.empty:
+                        fig = px.bar(sleep_counts, x=sleep_col, y='Count',
+                                     title=f"Distribution of {sleep_col}",
+                                     color='Count', color_continuous_scale=px.colors.sequential.Viridis)
+                        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
+                        st.plotly_chart(fig, use_container_width=True)
+                    else: st.info("No data for Sleep Duration distribution.")
+                except Exception as e: st.warning(f"Could not plot sleep distribution: {e}")
 
-        col_s1, col_s2 = st.columns(2)
+            # Depression by Sleep
+            with col_s2:
+                st.markdown(f"### Depression Rate by {sleep_col}")
+                if target_col in display_df_sleep.columns:
+                    try:
+                        sleep_dep = display_df_sleep.groupby(sleep_col, observed=True)[target_col].mean().reset_index()
+                        sleep_dep['Depression Rate (%)'] = sleep_dep[target_col] * 100
+                        sleep_dep = sleep_dep.sort_values('Depression Rate (%)', ascending=False)
+                        if not sleep_dep.empty:
+                            fig = px.bar(sleep_dep, x=sleep_col, y='Depression Rate (%)', text_auto='.1f',
+                                         title=f"Depression Rate by {sleep_col}",
+                                         color='Depression Rate (%)', color_continuous_scale='Bluered')
+                            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', yaxis_title='Depression Rate (%)')
+                            st.plotly_chart(fig, use_container_width=True)
+                        else: st.info(f"No aggregated data for Depression by {sleep_col}.")
+                    except Exception as e: st.warning(f"Could not plot Depression by {sleep_col}: {e}")
+                else: st.info(f"Target column '{target_col}' needed for this plot.")
 
-        with col_s1:
-            st.markdown("###  Sleep Category Distribution")
-            if not df_filtered.empty and sleep_col in df_filtered.columns:
-                sleep_counts = df_filtered[sleep_col].value_counts().reset_index()
-                sleep_counts.columns = [sleep_col, 'Count'] # Rename columns after reset_index
-
-                if not sleep_counts.empty:
-                     # Use a bar chart for distribution as pie might get crowded
-                     fig = px.bar(sleep_counts, x=sleep_col, y='Count',
-                                  title=f"Distribution of {sleep_col} (Filtered)",
-                                  color='Count', color_continuous_scale=px.colors.sequential.Viridis)
-                     fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
-                     st.plotly_chart(fig, use_container_width=True)
-                else: st.info("No data for Sleep Duration distribution after filtering.")
-            else: st.info("Sleep Duration column missing or no data after filtering.")
-
-
-        with col_s2:
-             st.markdown(f"###  Depression Rate by {sleep_col}")
-             if not df_filtered.empty and sleep_col in df_filtered.columns and depression_col in df_filtered.columns:
-                 sleep_dep = df_filtered.groupby(sleep_col, observed=True)[depression_col].mean().reset_index()
-                 sleep_dep['Depression Rate'] = sleep_dep[depression_col] * 100
-                 sleep_dep = sleep_dep.sort_values('Depression Rate', ascending=False)
-                 if not sleep_dep.empty:
-                      fig = px.bar(sleep_dep, x=sleep_col, y='Depression Rate',
-                                    title=f"Depression Rate by {sleep_col} (%)", text_auto='.1f',
-                                    color='Depression Rate', color_continuous_scale='Bluered')
-                      fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white',
-                                        yaxis=dict(title='Depression Rate (%)'))
-                      st.plotly_chart(fig, use_container_width=True)
-                 else: st.info(f"No data for Depression by {sleep_col} after filtering.")
-             else: st.info("Sleep Duration or Depression column missing or no data after filtering.")
-
-
-        st.markdown(f"###  {sleep_col} vs Other Factors")
-        if not df_filtered.empty and sleep_col in df_filtered.columns:
-             # Compare sleep categories against numeric variables using box plots
-             potential_comp_cols = ['Age', 'CGPA', 'Academic Pressure', 'Work Pressure', 'Study Satisfaction', 'Job Satisfaction', 'Work/Study Hours', 'Financial Stress']
-             available_numeric = [col for col in potential_comp_cols if col in df_filtered.columns and pd.api.types.is_numeric_dtype(df_filtered[col])]
-
-             if available_numeric:
-                  selected_numeric = st.selectbox(f"Select Numeric Factor to Compare with {sleep_col}:", available_numeric, key="sleep_compare")
-                  if selected_numeric:
-                       fig = px.box(df_filtered, x=sleep_col, y=selected_numeric,
-                                    color=depression_col if depression_col in df_filtered.columns else None,
-                                    color_discrete_map={0: 'lightgreen', 1: 'crimson'},
-                                    title=f"{selected_numeric} by {sleep_col} Category (Filtered)",
-                                    points="all")
-                       fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
-                       st.plotly_chart(fig, use_container_width=True)
-             else:
-                  st.warning("No suitable numeric factors found to compare with Sleep Duration in the filtered data.")
-        else: st.info("Sleep Duration column missing or no data after filtering.")
+            # Sleep vs Other Numeric Factors
+            st.markdown(f"### {sleep_col} vs Other Factors")
+            try:
+                available_numeric_sleep = display_df_sleep.select_dtypes(include=np.number).columns.tolist()
+                if target_col in available_numeric_sleep: available_numeric_sleep.remove(target_col) # Exclude target
+                if available_numeric_sleep:
+                    selected_numeric_sleep = st.selectbox(f"Select Numeric Factor to Compare with {sleep_col}:", available_numeric_sleep, key="sleep_compare_adv")
+                    if selected_numeric_sleep:
+                        fig = px.box(display_df_sleep, x=sleep_col, y=selected_numeric_sleep, points="all",
+                                     color=target_col if target_col in display_df_sleep.columns else None,
+                                     color_discrete_map={0: '#22c55e', 1: '#e11d48'}, # Green/Red
+                                     title=f"{selected_numeric_sleep} by {sleep_col} Category")
+                        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No suitable numeric factors found to compare with Sleep Duration.")
+            except Exception as e: st.warning(f"Could not create Sleep vs Factor plot: {e}")
 
 
     # ----------------- DIETARY ANALYSIS TAB -----------------
     with tabs[3]:
-        st.markdown("""
-            <h2 style='text-align: center; color: #7979f8;'> Dietary Analysis</h2>
-            <p class='subtitle' style='text-align: center;'>Dietary habits and their impact</p>
-            <hr>
-        """, unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center; color: #7979f8;'>Dietary Habits Analysis</h2>", unsafe_allow_html=True)
+        st.markdown("<p class='subtitle' style='text-align: center;'>Analyzing dietary habits and relationships (using filtered data)</p><hr>", unsafe_allow_html=True)
+        diet_col = 'Dietary Habits'
+        display_df_diet = df if df_filtered.empty else df_filtered
 
-        diet_col = 'Dietary Habits' # Use cleaned name
+        if diet_col not in display_df_diet.columns:
+             st.warning(f"Column '{diet_col}' not found in the data.")
+        elif display_df_diet.empty:
+             st.info("No data available for diet analysis based on filters.")
+        else:
+            col_d1, col_d2 = st.columns(2)
+            # Diet Distribution
+            with col_d1:
+                st.markdown(f"### {diet_col} Distribution")
+                try:
+                    diet_counts = display_df_diet[diet_col].value_counts().reset_index()
+                    diet_counts.columns = [diet_col, 'Count']
+                    if not diet_counts.empty:
+                        fig = px.pie(diet_counts, values='Count', names=diet_col,
+                                     title=f"Distribution of {diet_col}", hole=0.4,
+                                     color_discrete_sequence=px.colors.sequential.Plasma)
+                        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
+                        fig.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig, use_container_width=True)
+                    else: st.info("No data for Dietary Habits distribution.")
+                except Exception as e: st.warning(f"Could not plot diet distribution: {e}")
 
-        col_d1, col_d2 = st.columns(2)
+            # Depression by Diet
+            with col_d2:
+                st.markdown(f"### Depression Rate by {diet_col}")
+                if target_col in display_df_diet.columns:
+                    try:
+                        diet_dep = display_df_diet.groupby(diet_col, observed=True)[target_col].mean().reset_index()
+                        diet_dep['Depression Rate (%)'] = diet_dep[target_col] * 100
+                        diet_dep = diet_dep.sort_values('Depression Rate (%)', ascending=False)
+                        if not diet_dep.empty:
+                            fig = px.bar(diet_dep, x=diet_col, y='Depression Rate (%)', text_auto='.1f',
+                                         title=f"Depression Rate by {diet_col}",
+                                         color='Depression Rate (%)', color_continuous_scale='Bluered')
+                            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', yaxis_title='Depression Rate (%)')
+                            st.plotly_chart(fig, use_container_width=True)
+                        else: st.info(f"No aggregated data for Depression by {diet_col}.")
+                    except Exception as e: st.warning(f"Could not plot Depression by {diet_col}: {e}")
+                else: st.info(f"Target column '{target_col}' needed for this plot.")
 
-        with col_d1:
-            st.markdown(f"###  {diet_col} Distribution")
-            if not df_filtered.empty and diet_col in df_filtered.columns:
-                diet_counts = df_filtered[diet_col].value_counts().reset_index()
-                diet_counts.columns = [diet_col, 'Count'] # Rename after reset_index
-                if not diet_counts.empty:
-                     fig = px.pie(diet_counts, values='Count', names=diet_col,
-                                  title=f"Distribution of {diet_col} (Filtered)", hole=0.4,
-                                  color_discrete_sequence=px.colors.sequential.Plasma)
-                     fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
-                     fig.update_traces(textposition='inside', textinfo='percent+label')
-                     st.plotly_chart(fig, use_container_width=True)
-                else: st.info("No data for Dietary Habits distribution after filtering.")
-            else: st.info("Dietary Habits column missing or no data after filtering.")
-
-        with col_d2:
-            st.markdown(f"###  Depression by {diet_col}")
-            if not df_filtered.empty and diet_col in df_filtered.columns and depression_col in df_filtered.columns:
-                 diet_dep = df_filtered.groupby(diet_col, observed=True)[depression_col].mean().reset_index()
-                 diet_dep['Depression Rate'] = diet_dep[depression_col] * 100
-                 diet_dep = diet_dep.sort_values('Depression Rate', ascending=False)
-                 if not diet_dep.empty:
-                      fig = px.bar(diet_dep, x=diet_col, y='Depression Rate',
-                                    title=f"Depression Rate by {diet_col} (%)", text_auto='.1f',
-                                    color='Depression Rate', color_continuous_scale='Bluered')
-                      fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white',
-                                        yaxis=dict(title='Depression Rate (%)'))
-                      st.plotly_chart(fig, use_container_width=True)
-                 else: st.info(f"No data for Depression by {diet_col} after filtering.")
-            else: st.info("Dietary Habits or Depression column missing or no data after filtering.")
-
-        st.markdown(f"### {diet_col} and Other Factors")
-        if not df_filtered.empty and diet_col in df_filtered.columns:
-             # Compare diet against numeric variables
-             potential_comp_cols_diet = ['Age', 'CGPA', 'Academic Pressure', 'Work Pressure', 'Study Satisfaction', 'Job Satisfaction', 'Work/Study Hours', 'Financial Stress']
-             available_numeric_diet = [col for col in potential_comp_cols_diet if col in df_filtered.columns and pd.api.types.is_numeric_dtype(df_filtered[col])]
-
-             if available_numeric_diet:
-                  selected_numeric_diet = st.selectbox(f"Select Numeric Factor to Compare with {diet_col}:", available_numeric_diet, key="diet_compare")
-                  if selected_numeric_diet:
-                       fig = px.box(df_filtered, x=diet_col, y=selected_numeric_diet,
-                                    color=depression_col if depression_col in df_filtered.columns else None,
-                                    color_discrete_map={0: 'lightgreen', 1: 'crimson'},
-                                    title=f"{selected_numeric_diet} by {diet_col} (Filtered)", points="all")
-                       fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
-                       st.plotly_chart(fig, use_container_width=True)
-             else:
-                  st.warning("No suitable numeric factors found to compare with Dietary Habits in the filtered data.")
-        else: st.info("Dietary Habits column missing or no data after filtering.")
+            # Diet vs Other Numeric Factors
+            st.markdown(f"### {diet_col} vs Other Factors")
+            try:
+                available_numeric_diet = display_df_diet.select_dtypes(include=np.number).columns.tolist()
+                if target_col in available_numeric_diet: available_numeric_diet.remove(target_col)
+                if available_numeric_diet:
+                    selected_numeric_diet = st.selectbox(f"Select Numeric Factor to Compare with {diet_col}:", available_numeric_diet, key="diet_compare_adv")
+                    if selected_numeric_diet:
+                        fig = px.box(display_df_diet, x=diet_col, y=selected_numeric_diet, points="all",
+                                     color=target_col if target_col in display_df_diet.columns else None,
+                                     color_discrete_map={0: '#22c55e', 1: '#e11d48'}, # Green/Red
+                                     title=f"{selected_numeric_diet} by {diet_col}")
+                        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                     st.info("No suitable numeric factors found to compare with Dietary Habits.")
+            except Exception as e: st.warning(f"Could not create Diet vs Factor plot: {e}")
 
 
     # ----------------- ADVANCED ANALYTICS TAB -----------------
     with tabs[4]:
-        st.markdown("""
-            <h2 style='text-align: center; color: #7979f8;'> Advanced Analytics</h2>
-            <p class='subtitle' style='text-align: center;'>Correlations and multivariate views (Filtered Data)</p>
-            <hr>
-        """, unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center; color: #7979f8;'>Advanced Analytics</h2>", unsafe_allow_html=True)
+        st.markdown("<p class='subtitle' style='text-align: center;'>Correlations and multivariate views (using filtered data)</p><hr>", unsafe_allow_html=True)
+        display_df_adv = df if df_filtered.empty else df_filtered
 
-        st.markdown("###  Correlation Matrix (Numeric Variables)")
-        if not df_filtered.empty:
-             # Select numeric columns available in the filtered data
-             numeric_cols_filtered = df_filtered.select_dtypes(include=np.number).columns.tolist()
-             # Optionally exclude the target variable if present
-             if depression_col in numeric_cols_filtered:
-                  numeric_cols_filtered.remove(depression_col)
+        # Correlation Matrix
+        st.markdown("### Correlation Matrix (Numeric Variables)")
+        if not display_df_adv.empty:
+            numeric_cols_corr = display_df_adv.select_dtypes(include=np.number).columns.tolist()
+            # Include target for correlation, but maybe remove constant/binary later if needed
+            if len(numeric_cols_corr) > 1:
+                try:
+                    corr_matrix = display_df_adv[numeric_cols_corr].corr()
+                    fig_sns, ax = plt.subplots(figsize=(10, 8))
+                    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='magma', ax=ax, linewidths=.5, annot_kws={"size": 8})
+                    ax.set_title('Correlation Matrix (Filtered Numeric Data)', fontsize=14, color='white')
+                    plt.xticks(rotation=45, ha='right', color='white', fontsize=8)
+                    plt.yticks(rotation=0, color='white', fontsize=8)
+                    fig_sns.set_facecolor('#0e1117')
+                    ax.set_facecolor('#0e1117')
+                    plt.tight_layout()
+                    st.pyplot(fig_sns)
+                except Exception as e: st.warning(f"Could not generate correlation matrix: {e}")
+            else:
+                st.info(f"Not enough numeric columns ({len(numeric_cols_corr)}) for correlation matrix.")
+        else: st.info("No data available for correlation matrix based on filters.")
 
-             if len(numeric_cols_filtered) > 1:
-                  corr_matrix = df_filtered[numeric_cols_filtered].corr()
-                  fig_sns, ax = plt.subplots(figsize=(10, 8)) # Adjust size
-                  sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='magma', ax=ax, linewidths=.5)
-                  ax.set_title('Correlation Matrix (Filtered Numeric Variables)', fontsize=14, color='white')
-                  plt.xticks(rotation=45, ha='right', color='white')
-                  plt.yticks(rotation=0, color='white')
-                  fig_sns.set_facecolor('#0e1117')
-                  ax.set_facecolor('#0e1117')
-                  plt.tight_layout()
-                  st.pyplot(fig_sns)
-             else:
-                  st.warning(f"Not enough numeric columns found for correlation matrix in filtered data. Found: {numeric_cols_filtered}")
-        else: st.info("No data available based on current filters.")
-
-
+        # 3D Scatter Plot
         st.markdown("### Multivariate Analysis (3D Scatter)")
-        if not df_filtered.empty:
-             # Use available numeric columns from filtered data
-             scatter_cols_3d = numeric_cols_filtered # Use the list from correlation
-             if len(scatter_cols_3d) >= 3:
-                  col1, col2, col3 = st.columns(3)
-                  with col1: x_var = st.selectbox("X-axis:", scatter_cols_3d, index=0, key="3d_x_adv")
-                  with col2: y_var = st.selectbox("Y-axis:", scatter_cols_3d, index=min(1, len(scatter_cols_3d)-1), key="3d_y_adv")
-                  with col3: z_var = st.selectbox("Z-axis:", scatter_cols_3d, index=min(2, len(scatter_cols_3d)-1), key="3d_z_adv")
+        if not display_df_adv.empty:
+            scatter_cols_3d = display_df_adv.select_dtypes(include=np.number).columns.tolist()
+            if len(scatter_cols_3d) >= 3:
+                try:
+                    col1, col2, col3 = st.columns(3)
+                    with col1: x_var = st.selectbox("X-axis:", scatter_cols_3d, index=0, key="3d_x_adv_tab")
+                    with col2: y_var = st.selectbox("Y-axis:", scatter_cols_3d, index=min(1, len(scatter_cols_3d)-1), key="3d_y_adv_tab")
+                    with col3: z_var = st.selectbox("Z-axis:", scatter_cols_3d, index=min(2, len(scatter_cols_3d)-1), key="3d_z_adv_tab")
 
-                  color_var_3d = depression_col if depression_col in df_filtered.columns else None
+                    color_var_3d = target_col if target_col in display_df_adv.columns else None
 
-                  if x_var and y_var and z_var and len(set([x_var, y_var, z_var])) == 3:
-                       if color_var_3d:
-                            fig = px.scatter_3d(df_filtered, x=x_var, y=y_var, z=z_var, color=color_var_3d,
-                                                 color_discrete_map={0: 'lightgreen', 1: 'crimson'},
-                                                 opacity=0.7, title=f"3D Scatter: {x_var} vs {y_var} vs {z_var}",
-                                                 hover_data=[col for col in ['Profession', 'Degree', 'City'] if col in df_filtered.columns]) # Add hover info
-                            fig.update_layout(scene=dict(xaxis_title=x_var, yaxis_title=y_var, zaxis_title=z_var,
-                                                         bgcolor='#0e1117', # Match background
-                                                         xaxis=dict(backgroundcolor="rgba(0,0,0,0)", gridcolor="gray", showbackground=True, zerolinecolor="gray", color='white'),
-                                                         yaxis=dict(backgroundcolor="rgba(0,0,0,0)", gridcolor="gray", showbackground=True, zerolinecolor="gray", color='white'),
-                                                         zaxis=dict(backgroundcolor="rgba(0,0,0,0)", gridcolor="gray", showbackground=True, zerolinecolor="gray", color='white')),
-                                              margin=dict(l=0, r=0, b=0, t=40), paper_bgcolor='#0e1117')
-                            st.plotly_chart(fig, use_container_width=True)
-                       else: st.warning("Cannot color by 'Depression' as it's missing.")
-                  else: st.warning("Please select three different variables for the axes.")
-             else:
-                  st.warning(f"Need at least 3 numeric columns for 3D scatter plot. Found: {scatter_cols_3d}")
-        else: st.info("No data available based on current filters.")
+                    if x_var and y_var and z_var and len(set([x_var, y_var, z_var])) == 3:
+                        hover_cols_3d = [col for col in ['Profession', 'Degree', 'City', 'AgeRange'] if col in display_df_adv.columns]
+                        fig = px.scatter_3d(display_df_adv, x=x_var, y=y_var, z=z_var,
+                                            color=color_var_3d,
+                                            color_discrete_map={0: '#22c55e', 1: '#e11d48'}, # Green/Red
+                                            opacity=0.7, title=f"3D Scatter: {x_var} vs {y_var} vs {z_var}",
+                                            hover_data=hover_cols_3d)
 
+                        fig.update_layout(
+                            scene=dict(
+                                xaxis_title=x_var, yaxis_title=y_var, zaxis_title=z_var,
+                                bgcolor='#0e1117',
+                                xaxis=dict(backgroundcolor="rgba(0,0,0,0)", gridcolor="gray", showbackground=False, zerolinecolor="gray", color='white'),
+                                yaxis=dict(backgroundcolor="rgba(0,0,0,0)", gridcolor="gray", showbackground=False, zerolinecolor="gray", color='white'),
+                                zaxis=dict(backgroundcolor="rgba(0,0,0,0)", gridcolor="gray", showbackground=False, zerolinecolor="gray", color='white')),
+                            margin=dict(l=0, r=0, b=0, t=40), paper_bgcolor='#0e1117', font_color='white'
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    elif len(set([x_var, y_var, z_var])) < 3:
+                         st.warning("Please select three *different* variables for the axes.")
+                except Exception as e: st.warning(f"Could not generate 3D scatter plot: {e}")
+            else:
+                st.info(f"Need at least 3 numeric columns for 3D scatter plot. Found: {len(scatter_cols_3d)}")
+        else: st.info("No data available for 3D scatter plot based on filters.")
 
-    # --- Footer / Summary ---
+    # --- Footer ---
     st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align: center; color: #7979f8;'>End of Report</h3>", unsafe_allow_html=True)
-    # Your summary cards remain the same...
-    
+    st.markdown("<p style='text-align: center; color: #9ca3af;'>End of Dashboard</p>", unsafe_allow_html=True)
+
     # --- Sidebar Footer ---
     st.sidebar.markdown("---")
-    st.sidebar.info("Dashboard reflects data based on selected filters, except for Regression/Feature Importance which uses the full dataset.")
-
+    st.sidebar.info(" Dashboard views reflect filtered data. \n\n Depression Analysis tab uses the full, preprocessed dataset for modeling.")
 
 else:
-    # This block runs if df is None or empty after load_data()
-    st.error("Dashboard cannot be displayed: Data loading failed or the file is empty.")
+    # This block runs if load_and_prepare_data returned None
+    st.error("Dashboard cannot be displayed: Data loading or initial preprocessing failed. Please check the data file and script configuration.")
