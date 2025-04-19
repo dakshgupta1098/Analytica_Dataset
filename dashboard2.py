@@ -353,8 +353,7 @@ if df is not None and not df.empty:
     # --- Start of the modified section within tabs[1] ---
 st.markdown("""
     <h2 style='text-align: center; color: #7979f8;'> Depression Analysis</h2>
-    <p class='subtitle' style='text-align: center;'>Factors related to depression (Full Data Analysis)
-Note that some variables were treated as ordinal variables during the analysis through OneHot Encoding</p>
+    <p class='subtitle' style='text-align: center;'>Factors related to depression (Full Data Analysis including OneHot Encoding for Ordinal Variables)</p>
     <hr>
 """, unsafe_allow_html=True)
 
