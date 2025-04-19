@@ -364,338 +364,280 @@ if df is not None and not df.empty:
             else: st.info("No data to plot for Profession Treemap after filtering.")
         else: st.info("Profession or Depression column missing or no data after filtering.")
 
+    #depression tabbbbbbbbb
+    with tabs[1]:
+        st.markdown("<h2 style='text-align: center; color: #7979f8;'>Depression Analysis & Predictors</h2>", unsafe_allow_html=True)
+        st.markdown("<p class='subtitle' style='text-align: center;'>Modeling using the <strong>full dataset</strong> to identify factors associated with depression</p><hr>", unsafe_allow_html=True)
 
-    # ----------------- DEPRESSION ANALYSIS TAB -----------------
-    # --- Start of the modified section within tabs[1] ---
-    st.markdown("""
-        <h2 style='text-align: center; color: #7979f8;'> Depression Analysis</h2>
-        <p class='subtitle' style='text-align: center;'>Factors related to depression (Full Data Analysis including OneHot Encoding for Ordinal Variables)</p>
-        <hr>
-    """, unsafe_allow_html=True)
+        # --- Prepare Full Dataset for Modeling (Use original 'df') ---
+        st.markdown("### Predictor Analysis Setup")
 
-    # --- Prepare Full Dataset for Modeling ---
-    st.markdown("### Depression Predictors (Full Data Analysis)")
+        # Define potential predictors from ALL actual columns found
+        potential_predictors = [col for col in df.columns if col != target_col]
+        st.write(f"Using target: '{target_col}'")
+        st.write(f"Potential predictors ({len(potential_predictors)}): {potential_predictors}")
 
-    # Define potential predictor columns based on *existing* columns in df
-    potential_predictors = [
-    'Gender', 'Age', 'City', 'Profession', 'Academic Pressure',
-    'Work Pressure', 'CGPA', 'Study Satisfaction', 'Job Satisfaction',
-    'Sleep Duration', 'Dietary Habits', 'Degree',
-    'Have you ever had suicidal thoughts ?', 'Work/Study Hours',
-    'Financial Stress', 'Family History of Mental Illness',
-    'AgeRange' # Include binned age if it exists
-    ]
-    target = 'Depression' # Ensure this is the correct target column name
-
-    # Select only columns that actually exist in the original dataframe 'df'
-    available_predictors = [col for col in potential_predictors if col in df.columns]
-    if target not in df.columns:
-        st.error(f"Target variable '{target}' not found in the dataset. Cannot perform modeling.")
-    elif not available_predictors:
-        st.error("No potential predictor variables found in the dataset. Cannot perform modeling.")
-    else:
-        df_model = df[[target] + available_predictors].copy()
-        df_model.dropna(subset=[target], inplace=True) # Essential: Drop rows with missing target
-
-    # --- Data Preprocessing with Ordinal Handling ---
-    try:
-        y = df_model[target].astype(int) # Ensure target is integer
-        X = df_model[available_predictors]
-
-        # Define lists of column names by type
-        numerical_cols = X.select_dtypes(include=np.number).columns.tolist()
-        categorical_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
-
-        # Separate ordinal from nominal categorical columns
-        ordinal_cols = [
-            'Academic Pressure', 'Work Pressure', 'Study Satisfaction',
-            'Job Satisfaction', 'Work/Study Hours', 'Financial Stress'
-        ]
-        # Filter to only include those actually present in X
-        ordinal_cols = [col for col in ordinal_cols if col in X.columns]
-
-        # Nominal columns are those categorical columns that are NOT ordinal
-        nominal_cols = [col for col in categorical_cols if col not in ordinal_cols]
-
-        # --- !!! IMPORTANT: Define the ordered categories for YOUR data !!! ---
-        # Replace these lists with the actual unique values in the correct order
-        # Example: If 'Academic Pressure' has values 'Low', 'Medium', 'High'
-        # academic_pressure_order = ['Low', 'Medium', 'High']
-        # If a column is already numerically encoded (e.g., 1, 2, 3), you might treat it
-        # as numerical OR define the categories like [1, 2, 3] for OrdinalEncoder.
-
-        # Check if ordinal columns actually exist before defining categories
-        category_definitions = {}
-        if 'Academic Pressure' in ordinal_cols:
-            # Replace with your actual ordered categories for Academic Pressure
-            academic_pressure_order = [0,1,2,3,4,5] # Placeholder!
-            category_definitions['Academic Pressure'] = academic_pressure_order
-        if 'Work Pressure' in ordinal_cols:
-            # Replace with your actual ordered categories for Work Pressure
-            work_pressure_order = [0,2,5] # Placeholder!
-            category_definitions['Work Pressure'] = work_pressure_order
-        if 'Study Satisfaction' in ordinal_cols:
-             # Replace with your actual ordered categories for Study Satisfaction
-            study_satisfaction_order = [0,1,2,3,4,5] # Placeholder!
-            category_definitions['Study Satisfaction'] = study_satisfaction_order
-        if 'Job Satisfaction' in ordinal_cols:
-             # Replace with your actual ordered categories for Job Satisfaction
-            job_satisfaction_order = [0,1,2,3,4] # Placeholder!
-            category_definitions['Job Satisfaction'] = job_satisfaction_order
-        if 'Work/Study Hours' in ordinal_cols:
-             # Replace with your actual ordered categories for Work/Study Hours
-            work_study_hours_order = [0,1,2,3,4,5,6,7,8,9,10,11,12] # Placeholder!
-            category_definitions['Work/Study Hours'] = work_study_hours_order
-        
-        if 'Financial Stress' in ordinal_cols:
-             # Replace with your actual ordered categories for Financial Stress
-            financial_stress_order = [1,2,3,4,5] # Placeholder!
-            category_definitions['Financial Stress'] = financial_stress_order
-
-        # Create lists of categories in the same order as ordinal_cols
-        ordinal_categories = [category_definitions[col] for col in ordinal_cols if col in category_definitions]
-
-        # --- Build Preprocessing Pipelines ---
-        numerical_pipeline = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='median'))
-            # Add StandardScaler here if desired: ('scaler', StandardScaler())
-        ])
-
-        ordinal_pipeline = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='most_frequent')), # Impute before encoding
-            ('encoder', OrdinalEncoder(categories=ordinal_categories, handle_unknown='use_encoded_value', unknown_value=np.nan)) # Use defined categories
-        ])
-
-        nominal_pipeline = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='most_frequent')),
-            ('encoder', OneHotEncoder(handle_unknown='ignore', drop='first', sparse_output=False)) # sparse=False for dataframe output
-        ])
-
-        # --- Create Column Transformer ---
-        # Ensure columns listed here actually exist in X
-        transformers = []
-        if numerical_cols:
-            transformers.append(('num', numerical_pipeline, numerical_cols))
-        if ordinal_cols and ordinal_categories: # Only add if we have columns AND categories defined
-             transformers.append(('ord', ordinal_pipeline, ordinal_cols))
-        if nominal_cols:
-             transformers.append(('nom', nominal_pipeline, nominal_cols))
-
-        if not transformers:
-             st.error("No columns selected for preprocessing. Check column lists and data types.")
+        # Ensure target exists in the main df (already checked in load_and_prepare_data)
+        if target_col not in df.columns:
+            st.error(f"Critical Error: Target '{target_col}' missing from main dataframe. Cannot proceed.")
+        elif not potential_predictors:
+            st.error("Critical Error: No potential predictor columns found. Cannot proceed.")
         else:
-            preprocessor = ColumnTransformer(transformers=transformers, remainder='passthrough') # passthrough keeps unmentioned columns
+            # Use the full, cleaned dataframe for modeling
+            df_model = df[[target_col] + potential_predictors].copy()
+            # Final check: Drop rows where target is NA (shouldn't happen if cleaning worked)
+            df_model.dropna(subset=[target_col], inplace=True)
 
-            # --- Fit and Transform the data ---
-            X_processed = preprocessor.fit_transform(X)
+            if df_model.empty:
+                 st.error("Critical Error: Modeling dataframe is empty after selecting target and predictors.")
+            else:
+                st.write(f"Modeling with {len(df_model)} rows.")
+                y = df_model[target_col].astype(int) # Ensure target is integer
+                X = df_model[potential_predictors]
 
-            # --- Get Feature Names ---
-            # This is crucial for interpreting model results
-            try:
-                # Get feature names after transformation
-                feature_names_out = preprocessor.get_feature_names_out()
-                # Clean up names (remove prefixes like 'num__', 'ord__', 'nom__')
-                feature_names_cleaned = [name.split('__')[-1] for name in feature_names_out]
-            except Exception as e:
-                st.warning(f"Could not automatically get feature names: {e}. Using generic names.")
-                feature_names_cleaned = [f"feature_{i}" for i in range(X_processed.shape[1])]
+                # --- Dynamic Preprocessing Setup ---
+                st.markdown("#### Preprocessing Steps")
+                try:
+                    # Identify column types in the feature set X
+                    numerical_features = X.select_dtypes(include=np.number).columns.tolist()
+                    categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
 
+                    # Define which categoricals *should* be ordinal (use actual numeric columns for this)
+                    # These were likely converted to numeric earlier if they were like 1,2,3,4,5
+                    # Let's treat them as numeric unless explicitly defined otherwise.
+                    # We *will* encode non-numeric categoricals.
+                    ordinal_features_candidates = [
+                        'Academic Pressure', 'Work Pressure', 'Study Satisfaction',
+                        'Job Satisfaction', 'Work/Study Hours', 'Financial Stress'
+                    ]
+                    # Actual ordinal features are those candidates that are *still categorical* in X
+                    # (e.g., if they were 'Low', 'Medium', 'High' originally and converted to category)
+                    ordinal_features = [col for col in ordinal_features_candidates if col in categorical_features]
+                    nominal_features = [col for col in categorical_features if col not in ordinal_features]
 
-            # Convert processed data back to DataFrame for easier use with statsmodels and plotting
-            X_processed_df = pd.DataFrame(X_processed, columns=feature_names_cleaned, index=X.index)
-
-            # Here's the fixed code for your logistic regression section:
-
-            # --- Logistic Regression (Statsmodels) ---
-            st.markdown("#### Logistic Regression Coefficients")
-
-            try:
-                X_logit_final = X_processed_df.copy()
                 
-                # Ensure all columns are float for statsmodels
-                X_logit_final = X_logit_final.astype(float)
-                
-                # Drop constant columns if any were created (e.g., from OHE on low-variance features)
-                # Fix: Use variance check instead of nunique
-                cols_to_drop_logit = [col for col in X_logit_final.columns if X_logit_final[col].var() < 1e-10]
-                
-                if cols_to_drop_logit:
-                    st.write(f"Note: Removing constant columns before fitting Logit: {cols_to_drop_logit}")
-                    X_logit_final = X_logit_final.drop(columns=cols_to_drop_logit)
-                
-                # Add constant (intercept) only if predictors remain
-                if not X_logit_final.empty:
-                    X_const = sm.add_constant(X_logit_final)
-                    
-                    # Final check for NaNs/Infs
-                    has_nans = X_const.isnull().any().any()  # Fix: Use any().any() to get single boolean
-                    has_infs = np.isinf(X_const).any().any()  # Fix: Same here
-                    
-                    if has_nans:
-                        st.warning("NaNs detected before fitting Logit. Imputing NaNs with median for Logit.")
-                        # Impute NaNs that might have resulted from unknown ordinal values
-                        nan_imputer_logit = SimpleImputer(strategy='median')
-                        X_const_imputed = nan_imputer_logit.fit_transform(X_const)
-                        X_const = pd.DataFrame(X_const_imputed, columns=X_const.columns, index=X_const.index)
-                    
-                    # Second check for infs after imputation
-                    has_infs_after = np.isinf(X_const).any().any()  # Fix: Same approach for consistent checks
-                    
-                    if has_infs_after:
-                        st.error("Infinite values detected before fitting Logit even after imputation. Replacing with large values.")
-                        # Replace infs with large values
-                        X_const = X_const.replace([np.inf, -np.inf], [1e10, -1e10])
-                    
-                    # Check for perfect separation
-                    try:
-                        # Try fitting with a higher max_iter to avoid convergence issues
-                        log_reg = sm.Logit(y, X_const).fit(disp=0, maxiter=100)
-                        
-                        # Process results
-                        coef_df = log_reg.summary2().tables[1]
-                        
-                        # Drop intercept from visualization if present
-                        if 'const' in coef_df.index:
-                            coef_df = coef_df.drop('const')
-                        
-                        if not coef_df.empty:
-                            coef_df['abs_coef'] = coef_df['Coef.'].abs()
-                            coef_df_sorted = coef_df.sort_values(by='abs_coef', ascending=True)
-                            
-                            fig_logit = px.bar(
-                                coef_df_sorted, x='Coef.', y=coef_df_sorted.index, orientation='h',
-                                labels={'Coef.': 'Coefficient (Log-Odds)', 'y': 'Predictor Variable'},
-                                title="Logistic Regression Coefficients (Full Data)",
-                                color='Coef.', color_continuous_scale='Bluered_r'
-                            )
-                            
-                            fig_logit.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                                                font_color='white', height=max(400, len(coef_df_sorted)*20))
-                            
-                            st.plotly_chart(fig_logit, use_container_width=True)
-                            
-                            with st.expander("View Full Regression Summary (Statsmodels)"):
-                                st.text(log_reg.summary())
-                                st.dataframe(coef_df.sort_values(by='abs_coef', ascending=False))
-                        else:
-                            st.warning("Logistic Regression completed, but no predictor coefficients were generated.")
-                    
-                    except np.linalg.LinAlgError as e:
-                        st.error(f"Linear Algebra Error: {e}")
-                        st.warning("This often happens with perfect separation or multicollinearity issues.")
-                        st.info("Try adding regularization or removing highly correlated predictors.")
-                        
-                        # Alternative: Try with regularization
-                        st.info("Attempting with L2 regularization (Ridge)...")
+
+                    # --- Build Preprocessing Pipelines (More Robustly) ---
+                    transformers = []
+
+                    # Numerical Pipeline
+                    if numerical_features:
+                        num_pipeline = Pipeline(steps=[
+                            ('imputer', SimpleImputer(strategy='median')), # Median is robust to outliers
+                            #('scaler', StandardScaler()) # Scaling is often needed for Logit, optional for RF
+                        ])
+                        transformers.append(('num', num_pipeline, numerical_features))
+
+                    # Ordinal Pipeline (Auto-detect categories)
+                    if ordinal_features:
+                        # Get categories directly from data for each ordinal column
+                        ordinal_categories = []
+                        valid_ordinal_features = [] # Keep track of ones we can process
+                        for col in ordinal_features:
+                            try:
+                                # Get unique non-NA values and sort them if possible (numerically or alphabetically)
+                                cats = sorted(X[col].dropna().unique())
+                                ordinal_categories.append(cats)
+                                valid_ordinal_features.append(col)
+                                # st.write(f"Auto-detected categories for '{col}': {cats}")
+                            except TypeError: # Cannot sort mixed types
+                                cats = X[col].dropna().unique().tolist()
+                                ordinal_categories.append(cats)
+                                valid_ordinal_features.append(col)
+                                # st.write(f"Auto-detected (unsorted) categories for '{col}': {cats}")
+                            except Exception as e:
+                                st.warning(f"Could not auto-detect categories for ordinal feature '{col}': {e}. Skipping.")
+
+                        if valid_ordinal_features: # Only proceed if we have valid features/categories
+                             ord_pipeline = Pipeline(steps=[
+                                ('imputer', SimpleImputer(strategy='most_frequent')), # Impute before encoding
+                                ('encoder', OrdinalEncoder(categories=ordinal_categories, handle_unknown='use_encoded_value', unknown_value=-1)) # Encode known, map unknown to -1
+                             ])
+                             transformers.append(('ord', ord_pipeline, valid_ordinal_features))
+
+                    # Nominal Pipeline
+                    if nominal_features:
+                        nom_pipeline = Pipeline(steps=[
+                            ('imputer', SimpleImputer(strategy='most_frequent')), # Or use 'constant', fill_value='Unknown'
+                            ('encoder', OneHotEncoder(handle_unknown='ignore', drop='first', sparse_output=False))
+                        ])
+                        transformers.append(('nom', nom_pipeline, nominal_features))
+
+                    if not transformers:
+                        st.error("No valid features selected for preprocessing. Check data types and column lists.")
+                    else:
+                        # --- Create and Apply Column Transformer ---
+                        preprocessor = ColumnTransformer(
+                            transformers=transformers,
+                            remainder='passthrough' # Keep columns not specified (should be none if lists are correct)
+                        )
+
+                        st.write("Fitting preprocessor...")
+                        X_processed = preprocessor.fit_transform(X)
+                        st.write(f"Preprocessing complete. Processed data shape: {X_processed.shape}")
+
+                        # --- Get Feature Names After Transformation ---
                         try:
-                            log_reg_l2 = sm.Logit(y, X_const).fit_regularized(method='l2', alpha=0.1, disp=0)
-                            st.success("Regularized model succeeded! Showing regularized coefficients:")
-                            
-                            # Create a DataFrame for regularized coefficients
-                            reg_coefs = log_reg_l2.params
-                            coef_df_reg = pd.DataFrame({
-                                'Coef.': reg_coefs,
-                                'abs_coef': np.abs(reg_coefs)
-                            })
-                            
-                            if 'const' in coef_df_reg.index:
-                                coef_df_reg = coef_df_reg.drop('const')
-                            
-                            coef_df_reg_sorted = coef_df_reg.sort_values(by='abs_coef', ascending=True)
-                            
-                            fig_logit_reg = px.bar(
-                                coef_df_reg_sorted, x='Coef.', y=coef_df_reg_sorted.index, orientation='h',
-                                labels={'Coef.': 'Coefficient (Log-Odds with L2 Regularization)', 'y': 'Predictor Variable'},
-                                title="Regularized Logistic Regression Coefficients (Full Data)",
-                                color='Coef.', color_continuous_scale='Bluered_r'
-                            )
-                            
-                            fig_logit_reg.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                                                    font_color='white', height=max(400, len(coef_df_reg_sorted)*20))
-                            
-                            st.plotly_chart(fig_logit_reg, use_container_width=True)
-                            
-                        except Exception as e2:
-                            st.error(f"Regularized approach also failed: {e2}")
-                    
-                    except Exception as e:
-                        st.error(f"Error during Logistic Regression fitting: {e}")
-                        
-                else:
-                    st.warning("No valid predictor columns remained after checks for Logistic Regression.")
-            
-            except np.linalg.LinAlgError as e:
-                st.error(f"Error during Logistic Regression (Likely Multicollinearity): {e}")
-                st.error("Check predictor selection and preprocessing steps.")
-                # Optional: Add VIF calculation here if needed for debugging
-            
-            except Exception as e:
-                st.error(f"An unexpected error occurred during Logistic Regression analysis: {e}")
-                st.error("Please check data types, NaN/infinite values, and predictor selection.")
-                if 'X_const' in locals():
-                    st.dataframe(X_const.isnull().sum().rename("NaNs before fit"))
+                            feature_names_out = preprocessor.get_feature_names_out()
+                            feature_names_cleaned = [name.split('__')[-1] for name in feature_names_out]
+                        except Exception as e:
+                            st.warning(f"Could not automatically get feature names: {e}. Using generic names.")
+                            feature_names_cleaned = [f"feature_{i}" for i in range(X_processed.shape[1])]
 
+                        # Convert processed data back to DataFrame
+                        X_processed_df = pd.DataFrame(X_processed, columns=feature_names_cleaned, index=X.index)
 
-            # --- Feature Importance (Random Forest) ---
-            st.markdown("#### Random Forest Feature Importance")
-            try:
-                X_rf_final = X_processed_df.copy()
+                        # --- Final Checks on Processed Data ---
+                        # Check for NaNs introduced (e.g., by OrdinalEncoder unknown_value if set to np.nan)
+                        nan_check = X_processed_df.isnull().sum()
+                        inf_check = np.isinf(X_processed_df).sum()
 
-                # Impute any NaNs that might have resulted from unknown ordinal values
-                if X_rf_final.isnull().values.any():
-                     st.warning("NaNs detected before fitting Random Forest. Imputing with median for RF.")
-                     nan_imputer_rf = SimpleImputer(strategy='median')
-                     X_rf_imputed = nan_imputer_rf.fit_transform(X_rf_final)
-                     X_rf_final = pd.DataFrame(X_rf_imputed, columns=X_rf_final.columns, index=X_rf_final.index)
+                        if nan_check.sum() > 0 or inf_check.sum() > 0:
+                            st.warning("NaNs or Infs detected *after* initial preprocessing pipelines.")
+                            st.write("NaN counts per column:", nan_check[nan_check > 0])
+                            st.write("Inf counts per column:", inf_check[inf_check > 0])
 
+                            # Impute remaining NaNs/Infs robustly (e.g., with median/0)
+                            # Use SimpleImputer that handles both
+                            final_imputer = SimpleImputer(missing_values=np.nan, strategy='median')
+                            X_processed_df = pd.DataFrame(final_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
 
-                # RF doesn't like some special characters in feature names from OHE
-                # Let's clean them just in case, though get_feature_names_out usually handles this well
-                X_rf_final.columns = ["".join (c if c.isalnum() else "_" for c in str(x)) for x in X_rf_final.columns]
-                # Make sure cleaned names still align with our feature_names list if possible
-                cleaned_feature_names_rf = X_rf_final.columns.tolist()
+                            final_inf_imputer = SimpleImputer(missing_values=np.inf, strategy='constant', fill_value=np.finfo(np.float64).max) # Replace inf with large number
+                            X_processed_df = pd.DataFrame(final_inf_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
+                            final_neg_inf_imputer = SimpleImputer(missing_values=-np.inf, strategy='constant', fill_value=np.finfo(np.float64).min) # Replace -inf
+                            X_processed_df = pd.DataFrame(final_neg_inf_imputer.fit_transform(X_processed_df), columns=X_processed_df.columns, index=X_processed_df.index)
 
+                            st.write("Attempted final imputation for remaining NaNs/Infs.")
+                            if X_processed_df.isnull().values.any() or np.isinf(X_processed_df).values.any():
+                                st.error("Fatal Error: NaNs or Infs persist even after final imputation. Cannot fit models.")
+                                X_processed_df = None # Prevent model fitting
+                        else:
+                             st.write("Data successfully preprocessed with no NaNs or Infs detected.")
 
-                rf = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
-                rf.fit(X_rf_final, y)
+                        # ============ Logistic Regression (Statsmodels) ============
+                        if X_processed_df is not None:
+                            st.markdown("#### Logistic Regression Coefficients")
+                            try:
+                                X_logit_final = X_processed_df.copy()
 
-                importances = rf.feature_importances_
-                forest_importances = pd.Series(importances, index=cleaned_feature_names_rf) # Use cleaned names
-                forest_imp_df = pd.DataFrame({'Feature': forest_importances.index,
-                                              'Importance': forest_importances.values})
-                forest_imp_df = forest_imp_df.sort_values('Importance', ascending=True)
+                                # Ensure all columns are float for statsmodels
+                                X_logit_final = X_logit_final.astype(float)
 
-                if not forest_imp_df.empty:
-                    fig_rf = px.bar(forest_imp_df, x='Importance', y='Feature', orientation='h',
-                                    title="Feature Importance from Random Forest (Full Data)",
-                                    color='Importance', color_continuous_scale='Viridis')
-                    fig_rf.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                                         font_color='white', height=max(400, len(forest_imp_df)*20))
-                    st.plotly_chart(fig_rf, use_container_width=True)
-                    with st.expander("View Importance Values"):
-                        st.dataframe(forest_imp_df.sort_values('Importance', ascending=False))
-                else:
-                    st.warning("Could not calculate Random Forest feature importances.")
+                                # Drop constant columns (low variance)
+                                cols_to_drop_logit = [col for col in X_logit_final.columns if X_logit_final[col].nunique() <= 1]
+                                if cols_to_drop_logit:
+                                    st.write(f"Note: Removing constant columns before fitting Logit: {cols_to_drop_logit}")
+                                    X_logit_final = X_logit_final.drop(columns=cols_to_drop_logit)
 
-            except Exception as e:
-                st.error(f"Error during Random Forest analysis: {e}")
-                st.error(f"Type of X_rf_final: {type(X_rf_final)}")
-                if isinstance(X_rf_final, pd.DataFrame):
-                    st.write("X_rf_final columns:", X_rf_final.columns)
-                    st.write("X_rf_final NaNs:\n", X_rf_final.isnull().sum())
-                # traceback.print_exc() # Uncomment for detailed traceback in console
+                                if X_logit_final.empty:
+                                    st.warning("No valid predictor columns remained after removing constant ones for Logistic Regression.")
+                                else:
+                                    # Add constant (intercept)
+                                    X_const = sm.add_constant(X_logit_final, has_constant='raise') # Raise error if constant already exists
 
-    except KeyError as e:
-        st.error(f"Data Preparation Error: A specified column is missing: {e}. Check column names and lists (ordinal_cols, numerical_cols, nominal_cols).")
-    except ValueError as e:
-         st.error(f"Data Preparation Error: Likely an issue with category definitions for OrdinalEncoder or data types. Error: {e}")
-         st.error("Ensure the category lists provided to OrdinalEncoder exactly match the unique values and order in your data.")
-    except Exception as e:
-        st.error(f"An unexpected error occurred during data preparation: {e}")
-        # traceback.print_exc() # Uncomment for detailed traceback in console
+                                    # --- Fit Logit Model ---
+                                    st.write(f"Fitting Logistic Regression model on {X_const.shape[0]} samples and {X_const.shape[1]-1} predictors...")
+                                    log_reg = sm.Logit(y, X_const).fit(disp=0) # disp=0 suppresses convergence messages
 
+                                    # --- Display Results ---
+                                    coef_df = log_reg.summary2().tables[1]
+                                    if 'const' in coef_df.index:
+                                        coef_df = coef_df.drop('const')
 
-# --- End of the modified section ---
+                                    if not coef_df.empty:
+                                        coef_df['abs_coef'] = coef_df['Coef.'].abs()
+                                        # Filter out insignificant coefficients if desired (e.g., P>|z| > 0.05)
+                                        # coef_df_significant = coef_df[coef_df['P>|z|'] <= 0.05]
+                                        coef_df_sorted = coef_df.sort_values(by='abs_coef', ascending=True)
+
+                                        fig_logit = px.bar(
+                                            coef_df_sorted, x='Coef.', y=coef_df_sorted.index, orientation='h',
+                                            labels={'Coef.': 'Coefficient (Log-Odds)', 'index': 'Predictor Variable'},
+                                            title="Logistic Regression Coefficients (Significant Predictors)",
+                                            color='Coef.', color_continuous_scale='Bluered_r', # Red for positive, Blue for negative
+                                            text='Coef.', # Show coefficient value on bars
+                                        )
+                                        fig_logit.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+                                        fig_logit.update_layout(
+                                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                                            font_color='white', yaxis_title=None,
+                                            height=max(400, len(coef_df_sorted)*25) # Adjust height dynamically
+                                        )
+                                        st.plotly_chart(fig_logit, use_container_width=True)
+
+                                        with st.expander("View Full Regression Summary (Statsmodels)"):
+                                            st.text(log_reg.summary())
+                                        with st.expander("View Coefficient Table"):
+                                            st.dataframe(coef_df.sort_values(by='abs_coef', ascending=False))
+                                    else:
+                                        st.warning("Logistic Regression completed, but no predictor coefficients were generated (excluding constant).")
+
+                            # --- Specific Error Handling for Logit ---
+                            except PerfectSeparationError as e:
+                                st.error(f"Logistic Regression Error: Perfect separation detected. {e}")
+                                st.error("This means one or more predictors perfectly predict the outcome for a subset of data. Consider removing predictors or simplifying the model.")
+                            except np.linalg.LinAlgError as e:
+                                st.error(f"Logistic Regression Error: Linear Algebra Error (Likely Multicollinearity). {e}")
+                                st.error("Check for highly correlated predictors using the correlation matrix in 'Advanced Analytics'. Consider removing some predictors.")
+                                # Optional: Add VIF calculation here
+                            except Exception as e:
+                                st.error(f"An unexpected error occurred during Logistic Regression: {e}")
+                                st.error("Check data types, NaN/infinite values (should be handled), and predictor selection.")
+                                # traceback.print_exc() # Uncomment for detailed traceback in console/logs
+
+                        # ============ Feature Importance (Random Forest) ============
+                        if X_processed_df is not None:
+                            st.markdown("#### Random Forest Feature Importance")
+                            try:
+                                X_rf_final = X_processed_df.copy()
+
+                                # RF handles NaNs implicitly, but cleaning names is good practice
+                                # Clean column names for RF (less strict than Logit but good practice)
+                                X_rf_final.columns = ["".join(c if c.isalnum() else "_" for c in str(x)) for x in X_rf_final.columns]
+                                cleaned_feature_names_rf = X_rf_final.columns.tolist()
+
+                                if X_rf_final.empty:
+                                     st.warning("No valid features remaining for Random Forest.")
+                                else:
+                                    st.write(f"Fitting Random Forest model on {X_rf_final.shape[0]} samples and {X_rf_final.shape[1]} predictors...")
+                                    rf = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced', n_jobs=-1) # Use available cores
+                                    rf.fit(X_rf_final, y)
+
+                                    importances = rf.feature_importances_
+                                    forest_importances = pd.Series(importances, index=cleaned_feature_names_rf)
+                                    forest_imp_df = pd.DataFrame({'Feature': forest_importances.index, 'Importance': forest_importances.values})
+                                    forest_imp_df = forest_imp_df.sort_values('Importance', ascending=True)
+
+                                    if not forest_imp_df.empty:
+                                        fig_rf = px.bar(forest_imp_df.tail(20), x='Importance', y='Feature', orientation='h', # Show top 20
+                                                        title="Top 20 Feature Importances from Random Forest",
+                                                        color='Importance', color_continuous_scale='Viridis')
+                                        fig_rf.update_layout(
+                                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                                            font_color='white', yaxis_title=None,
+                                            height=max(400, len(forest_imp_df.tail(20))*25)
+                                        )
+                                        st.plotly_chart(fig_rf, use_container_width=True)
+
+                                        with st.expander("View All Importance Values"):
+                                            st.dataframe(forest_imp_df.sort_values('Importance', ascending=False))
+                                    else:
+                                        st.warning("Could not calculate Random Forest feature importances.")
+
+                            except Exception as e:
+                                st.error(f"An unexpected error occurred during Random Forest analysis: {e}")
+                                st.error("Check the processed data and feature names.")
+                                # traceback.print_exc() # Uncomment for detailed traceback
+
+                # --- General Error Handling for Preprocessing ---
+                except KeyError as e:
+                    st.error(f"Data Preparation Error: A specified column is missing: {e}. Check column definitions.")
+                except ValueError as e:
+                    st.error(f"Data Preparation Error: Issue with data types or encoding. Error: {e}")
+                    st.error("Check category definitions (now auto-detected) and ensure data consistency.")
+                except Exception as e:
+                    st.error(f"An unexpected error occurred during data preparation/modeling setup: {e}")
+                    # traceback.print_exc() # Uncomment for detailed traceback
 
 
     # ----------------- SLEEP PATTERNS TAB -----------------
