@@ -89,7 +89,7 @@ def load_data(file_path="Analytica Dataset.csv"):
             print(f"Warning: Column '{col}' not found in DataFrame.")
 
     # Drop rows where *any* of the specified columns became NaN after conversion
-    df.dropna(subset=numeric_cols_to_check, inplace=True)
+    df.dropna(subset=numeric_cols, inplace=True)
 
 
     # Drop ID column if it exists (use cleaned name)
