@@ -820,12 +820,12 @@ else:
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align: center; color: #7979f8;'>End of Report</h3>", unsafe_allow_html=True)
     # Your summary cards remain the same...
-
+    else:
+    # This block runs if df is None or empty after load_data()
+        st.error("Dashboard cannot be displayed: Data loading failed or the file is empty.")
 
     # --- Sidebar Footer ---
     st.sidebar.markdown("---")
     st.sidebar.info("Dashboard reflects data based on selected filters, except for Regression/Feature Importance which uses the full dataset.")
 
-else:
-    # This block runs if df is None or empty after load_data()
-    st.error("Dashboard cannot be displayed: Data loading failed or the file is empty.")
+
