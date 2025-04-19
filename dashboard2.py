@@ -504,71 +504,136 @@ if df is not None and not df.empty:
             # Convert processed data back to DataFrame for easier use with statsmodels and plotting
             X_processed_df = pd.DataFrame(X_processed, columns=feature_names_cleaned, index=X.index)
 
+            # Here's the fixed code for your logistic regression section:
+
             # --- Logistic Regression (Statsmodels) ---
             st.markdown("#### Logistic Regression Coefficients")
+
             try:
                 X_logit_final = X_processed_df.copy()
-
+                
                 # Ensure all columns are float for statsmodels
                 X_logit_final = X_logit_final.astype(float)
-
+                
                 # Drop constant columns if any were created (e.g., from OHE on low-variance features)
-                cols_to_drop_logit = [col for col in X_logit_final.columns if X_logit_final[col].nunique() <= 1]
+                # Fix: Use variance check instead of nunique
+                cols_to_drop_logit = [col for col in X_logit_final.columns if X_logit_final[col].var() < 1e-10]
+                
                 if cols_to_drop_logit:
                     st.write(f"Note: Removing constant columns before fitting Logit: {cols_to_drop_logit}")
                     X_logit_final = X_logit_final.drop(columns=cols_to_drop_logit)
-
+                
                 # Add constant (intercept) only if predictors remain
                 if not X_logit_final.empty:
-                    X_const = sm.add_constant(X_logit_final, has_constant='add')
-
-                    # Final check for NaNs/Infs (OrdinalEncoder with unknown_value=np.nan might introduce NaNs)
-                    if X_const.isnull().values.any() or np.isinf(X_const).values.any():
-                        st.warning("NaNs or Infs detected before fitting Logit. Imputing NaNs with median for Logit.")
+                    X_const = sm.add_constant(X_logit_final)
+                    
+                    # Final check for NaNs/Infs
+                    has_nans = X_const.isnull().any().any()  # Fix: Use any().any() to get single boolean
+                    has_infs = np.isinf(X_const).any().any()  # Fix: Same here
+                    
+                    if has_nans:
+                        st.warning("NaNs detected before fitting Logit. Imputing NaNs with median for Logit.")
                         # Impute NaNs that might have resulted from unknown ordinal values
                         nan_imputer_logit = SimpleImputer(strategy='median')
                         X_const_imputed = nan_imputer_logit.fit_transform(X_const)
                         X_const = pd.DataFrame(X_const_imputed, columns=X_const.columns, index=X_const.index)
-
-                    if np.isinf(X_const).values.any():
-                         st.error("Infinite values detected before fitting Logit even after imputation. Check data preprocessing.")
-                    else:
-                        log_reg = sm.Logit(y, X_const).fit(disp=0)
-
+                    
+                    # Second check for infs after imputation
+                    has_infs_after = np.isinf(X_const).any().any()  # Fix: Same approach for consistent checks
+                    
+                    if has_infs_after:
+                        st.error("Infinite values detected before fitting Logit even after imputation. Replacing with large values.")
+                        # Replace infs with large values
+                        X_const = X_const.replace([np.inf, -np.inf], [1e10, -1e10])
+                    
+                    # Check for perfect separation
+                    try:
+                        # Try fitting with a higher max_iter to avoid convergence issues
+                        log_reg = sm.Logit(y, X_const).fit(disp=0, maxiter=100)
+                        
+                        # Process results
                         coef_df = log_reg.summary2().tables[1]
+                        
+                        # Drop intercept from visualization if present
                         if 'const' in coef_df.index:
                             coef_df = coef_df.drop('const')
-
+                        
                         if not coef_df.empty:
                             coef_df['abs_coef'] = coef_df['Coef.'].abs()
                             coef_df_sorted = coef_df.sort_values(by='abs_coef', ascending=True)
-
+                            
                             fig_logit = px.bar(
                                 coef_df_sorted, x='Coef.', y=coef_df_sorted.index, orientation='h',
                                 labels={'Coef.': 'Coefficient (Log-Odds)', 'y': 'Predictor Variable'},
                                 title="Logistic Regression Coefficients (Full Data)",
                                 color='Coef.', color_continuous_scale='Bluered_r'
                             )
+                            
                             fig_logit.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                                                    font_color='white', height=max(400, len(coef_df_sorted)*20))
+                                                font_color='white', height=max(400, len(coef_df_sorted)*20))
+                            
                             st.plotly_chart(fig_logit, use_container_width=True)
-
+                            
                             with st.expander("View Full Regression Summary (Statsmodels)"):
                                 st.text(log_reg.summary())
                                 st.dataframe(coef_df.sort_values(by='abs_coef', ascending=False))
                         else:
                             st.warning("Logistic Regression completed, but no predictor coefficients were generated.")
+                    
+                    except np.linalg.LinAlgError as e:
+                        st.error(f"Linear Algebra Error: {e}")
+                        st.warning("This often happens with perfect separation or multicollinearity issues.")
+                        st.info("Try adding regularization or removing highly correlated predictors.")
+                        
+                        # Alternative: Try with regularization
+                        st.info("Attempting with L2 regularization (Ridge)...")
+                        try:
+                            log_reg_l2 = sm.Logit(y, X_const).fit_regularized(method='l2', alpha=0.1, disp=0)
+                            st.success("Regularized model succeeded! Showing regularized coefficients:")
+                            
+                            # Create a DataFrame for regularized coefficients
+                            reg_coefs = log_reg_l2.params
+                            coef_df_reg = pd.DataFrame({
+                                'Coef.': reg_coefs,
+                                'abs_coef': np.abs(reg_coefs)
+                            })
+                            
+                            if 'const' in coef_df_reg.index:
+                                coef_df_reg = coef_df_reg.drop('const')
+                            
+                            coef_df_reg_sorted = coef_df_reg.sort_values(by='abs_coef', ascending=True)
+                            
+                            fig_logit_reg = px.bar(
+                                coef_df_reg_sorted, x='Coef.', y=coef_df_reg_sorted.index, orientation='h',
+                                labels={'Coef.': 'Coefficient (Log-Odds with L2 Regularization)', 'y': 'Predictor Variable'},
+                                title="Regularized Logistic Regression Coefficients (Full Data)",
+                                color='Coef.', color_continuous_scale='Bluered_r'
+                            )
+                            
+                            fig_logit_reg.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                                                    font_color='white', height=max(400, len(coef_df_reg_sorted)*20))
+                            
+                            st.plotly_chart(fig_logit_reg, use_container_width=True)
+                            
+                        except Exception as e2:
+                            st.error(f"Regularized approach also failed: {e2}")
+                    
+                    except Exception as e:
+                        st.error(f"Error during Logistic Regression fitting: {e}")
+                        
                 else:
                     st.warning("No valid predictor columns remained after checks for Logistic Regression.")
-
+            
             except np.linalg.LinAlgError as e:
                 st.error(f"Error during Logistic Regression (Likely Multicollinearity): {e}")
                 st.error("Check predictor selection and preprocessing steps.")
                 # Optional: Add VIF calculation here if needed for debugging
+            
             except Exception as e:
                 st.error(f"An unexpected error occurred during Logistic Regression analysis: {e}")
                 st.error("Please check data types, NaN/infinite values, and predictor selection.")
-                if 'X_const' in locals(): st.dataframe(X_const.isnull().sum().rename("NaNs before fit"))
+                if 'X_const' in locals():
+                    st.dataframe(X_const.isnull().sum().rename("NaNs before fit"))
 
 
             # --- Feature Importance (Random Forest) ---
