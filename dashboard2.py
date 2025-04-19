@@ -82,6 +82,16 @@ def load_data(file_path="Analytica Dataset.csv"):
         'Depression' # Target variable
     ]
 
+    for col in numeric_cols:
+        if col in df.columns: # Check if column exists
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        else:
+            print(f"Warning: Column '{col}' not found in DataFrame.")
+
+    # Drop rows where *any* of the specified columns became NaN after conversion
+    df.dropna(subset=numeric_cols_to_check, inplace=True)
+
+
     # Drop ID column if it exists (use cleaned name)
     if 'id' in df.columns:
         df.drop(columns=['id'], inplace=True)
