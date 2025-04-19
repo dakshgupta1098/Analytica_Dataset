@@ -67,7 +67,7 @@ st.markdown("""
 
 # --- Robust Data Loading and Initial Cleaning ---
 @st.cache_data
-def load_and_prepare_data(file_path="C:\\Users\\daksh\\Downloads\\Daksh_data\\Analytica Dataset.csv"):
+def load_and_prepare_data(file_path="Analytica Dataset.csv"):
     """Loads, cleans, and prepares the dataset."""
     st.write(f"Attempting to load data from: {file_path}")
     try:
