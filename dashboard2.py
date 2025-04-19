@@ -357,35 +357,35 @@ if df is not None and not df.empty:
 
     # ----------------- DEPRESSION ANALYSIS TAB -----------------
     # --- Start of the modified section within tabs[1] ---
-st.markdown("""
-    <h2 style='text-align: center; color: #7979f8;'> Depression Analysis</h2>
-    <p class='subtitle' style='text-align: center;'>Factors related to depression (Full Data Analysis including OneHot Encoding for Ordinal Variables)</p>
-    <hr>
-""", unsafe_allow_html=True)
+    st.markdown("""
+        <h2 style='text-align: center; color: #7979f8;'> Depression Analysis</h2>
+        <p class='subtitle' style='text-align: center;'>Factors related to depression (Full Data Analysis including OneHot Encoding for Ordinal Variables)</p>
+        <hr>
+    """, unsafe_allow_html=True)
 
-# --- Prepare Full Dataset for Modeling ---
-st.markdown("### Depression Predictors (Full Data Analysis)")
+    # --- Prepare Full Dataset for Modeling ---
+    st.markdown("### Depression Predictors (Full Data Analysis)")
 
-# Define potential predictor columns based on *existing* columns in df
-potential_predictors = [
+    # Define potential predictor columns based on *existing* columns in df
+    potential_predictors = [
     'Gender', 'Age', 'City', 'Profession', 'Academic Pressure',
     'Work Pressure', 'CGPA', 'Study Satisfaction', 'Job Satisfaction',
     'Sleep Duration', 'Dietary Habits', 'Degree',
     'Have you ever had suicidal thoughts ?', 'Work/Study Hours',
     'Financial Stress', 'Family History of Mental Illness',
     'AgeRange' # Include binned age if it exists
-]
-target = 'Depression' # Ensure this is the correct target column name
+    ]
+    target = 'Depression' # Ensure this is the correct target column name
 
-# Select only columns that actually exist in the original dataframe 'df'
-available_predictors = [col for col in potential_predictors if col in df.columns]
-if target not in df.columns:
-    st.error(f"Target variable '{target}' not found in the dataset. Cannot perform modeling.")
-elif not available_predictors:
-    st.error("No potential predictor variables found in the dataset. Cannot perform modeling.")
-else:
-    df_model = df[[target] + available_predictors].copy()
-    df_model.dropna(subset=[target], inplace=True) # Essential: Drop rows with missing target
+    # Select only columns that actually exist in the original dataframe 'df'
+    available_predictors = [col for col in potential_predictors if col in df.columns]
+    if target not in df.columns:
+        st.error(f"Target variable '{target}' not found in the dataset. Cannot perform modeling.")
+    elif not available_predictors:
+        st.error("No potential predictor variables found in the dataset. Cannot perform modeling.")
+    else:
+        df_model = df[[target] + available_predictors].copy()
+        df_model.dropna(subset=[target], inplace=True) # Essential: Drop rows with missing target
 
     # --- Data Preprocessing with Ordinal Handling ---
     try:
@@ -820,12 +820,12 @@ else:
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align: center; color: #7979f8;'>End of Report</h3>", unsafe_allow_html=True)
     # Your summary cards remain the same...
-    else:
-    # This block runs if df is None or empty after load_data()
-        st.error("Dashboard cannot be displayed: Data loading failed or the file is empty.")
-
+    
     # --- Sidebar Footer ---
     st.sidebar.markdown("---")
     st.sidebar.info("Dashboard reflects data based on selected filters, except for Regression/Feature Importance which uses the full dataset.")
 
 
+else:
+    # This block runs if df is None or empty after load_data()
+    st.error("Dashboard cannot be displayed: Data loading failed or the file is empty.")
